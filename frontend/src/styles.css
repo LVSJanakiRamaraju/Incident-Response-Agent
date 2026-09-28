@@ -296,6 +296,8 @@ h1 { margin: 7px 0 4px; font-size: 29px; line-height: 1.2; letter-spacing: 0; fo
 .metric-tile > small { font-size: 7px; }
 .metric-action { display: inline-flex; align-items: center; gap: 3px; margin-top: auto; padding-top: 7px; color: #63746a; font: 8px var(--mono); }
 .tool-result { margin-top: 9px; overflow: hidden; background: #f5f7f2; border: 1px solid #e3e9e1; border-radius: 5px; }
+.tool-results { display: grid; gap: 8px; margin-top: 9px; }
+.tool-results .tool-result { margin-top: 0; }
 .tool-result-heading { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #e4e9e2; }
 .tool-terminal-icon { width: 25px; height: 25px; display: grid; flex: 0 0 auto; place-items: center; color: #547263; background: #e4ece5; border-radius: 4px; }
 .tool-result-heading > span:nth-child(2) { display: flex; flex-direction: column; gap: 3px; }
@@ -307,6 +309,13 @@ h1 { margin: 7px 0 4px; font-size: 29px; line-height: 1.2; letter-spacing: 0; fo
 .tool-result-body { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
 .tool-result-body code { overflow-wrap: anywhere; color: #546258; font: 8px/1.7 var(--mono); }
 .tool-result-body > small { color: #8b958e; font: 7px var(--mono); }
+.logs-list { display: grid; gap: 0; padding: 3px 9px; }
+.log-entry { display: grid; grid-template-columns: 59px 40px minmax(0,1fr); gap: 7px; align-items: baseline; padding: 6px 1px; border-top: 1px solid #e7ece5; font: 8px/1.5 var(--mono); }
+.log-entry:first-child { border-top: 0; }
+.log-entry time { color: #89948c; }
+.log-entry b { color: #a74437; font-size: 7px; }
+.log-warn b { color: #9b701d; }
+.log-entry span { color: #4f5b52; overflow-wrap: anywhere; }
 .memory-section { display: flex; flex-direction: column; }
 .memory-section .section-heading h2 { color: #234c38; }
 .memory-section .status-pill { margin-left: auto; }
@@ -512,6 +521,7 @@ h1 { margin: 7px 0 4px; font-size: 29px; line-height: 1.2; letter-spacing: 0; fo
 	.metric-top { align-items: flex-start; white-space: normal; font-size: 8px; }
 	.metric-tile > strong { font-size: 19px; }
 	.tool-result-body code { font-size: 7px; }
+	.log-entry { grid-template-columns: 49px 34px minmax(0,1fr); gap: 4px; font-size: 7px; }
 	.memory-actions { align-items: flex-start; flex-direction: column; }
 	.memory-actions > div { max-width: unset; }
 	.button-memory { align-self: flex-start; }

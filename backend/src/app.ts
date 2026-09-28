@@ -3,6 +3,7 @@ import { demoIncident } from "./incidents/incident.js";
 import { historicalIncident, MemoryService, createMemoryServiceFromEnv, type IncidentExperience } from "./memory/memory.service.js";
 import { AnalysisService, createAnalysisServiceFromEnv, type AnalysisInput, type IncidentAnalysis } from "./llm/analysis.service.js";
 import { getMetrics, getResolvedMetrics, type ServiceMetrics } from "./tools/metrics.js";
+import { getRecentLogs, type ServiceLogEntry } from "./tools/logs.js";
 import { createStatusChecksFromEnv, getSystemStatus, type StatusChecks } from "./system/status.service.js";
 
 interface MemoryServicePort {
@@ -49,6 +50,14 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 		}
 	});
 
+	app.get("/api/tools/logs/:service", (request, response) => {
+		try {
+			response.json({ service: request.params.service, logs: getRecentLogs(request.params.service), source: "simulated demo tool" });
+		} catch (error) {
+			response.status(404).json({ error: error instanceof Error ? error.message : "Logs unavailable" });
+		}
+	});
+
 	app.post("/api/memory/seed", async (_request, response) => {
 		try {
 			memoryService ??= createMemoryServiceFromEnv();
@@ -89,11 +98,22 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 		}
 		trace.push({ id: "recall", label: memories.length ? "Hindsight memories recalled" : "Hindsight search completed", detail: `${memories.length} memories returned`, status: "completed", durationMs: Date.now() - recallStarted, occurredAt: new Date().toISOString() });
 
+		const logsStarted = Date.now();
+		let logs: ServiceLogEntry[];
+		try {
+			logs = getRecentLogs(currentIncident.service);
+			trace.push({ id: "logs", label: "Recent logs retrieved", detail: `getRecentLogs(\"${currentIncident.service}\") · ${logs.length} entries`, status: "completed", durationMs: Date.now() - logsStarted, occurredAt: new Date().toISOString() });
+		} catch {
+			trace.push({ id: "logs", label: "Recent log retrieval failed", detail: "The logs tool could not return current evidence.", status: "failed", durationMs: Date.now() - logsStarted, occurredAt: new Date().toISOString() });
+			response.status(503).json({ code: "LOGS_UNAVAILABLE", dependency: "metrics", error: "The logs tool could not collect recent service evidence.", trace });
+			return;
+		}
+
 		analysisService ??= createAnalysisServiceFromEnv();
 		const analysisStarted = Date.now();
 		let analysis: IncidentAnalysis;
 		try {
-			analysis = await analysisService.analyze({ incident: currentIncident, metrics, memories });
+			analysis = await analysisService.analyze({ incident: currentIncident, metrics, logs, memories });
 		} catch (error) {
 			const unavailableModel = (error as { status?: number }).status === 404;
 			trace.push({ id: "analysis", label: "Groq analysis failed", detail: unavailableModel ? "The configured model was not found or is not available to this account." : "The model provider did not complete the analysis request.", status: "failed", durationMs: Date.now() - analysisStarted, occurredAt: new Date().toISOString() });
@@ -102,7 +122,7 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 		}
 		trace.push({ id: "analysis", label: "Agent analysis generated", detail: "Current evidence and recalled memories were supplied to the model.", status: "completed", durationMs: Date.now() - analysisStarted, occurredAt: new Date().toISOString() });
 		lastInvestigation = { incidentId: currentIncident.id, metrics, analysis };
-		response.json({ incident: currentIncident, metrics, memories, analysis, status: "HYPOTHESIS", trace });
+		response.json({ incident: currentIncident, metrics, logs, memories, analysis, status: "HYPOTHESIS", trace });
 	});
 
 	app.post("/api/incidents/:id/resolve", async (request, response) => {

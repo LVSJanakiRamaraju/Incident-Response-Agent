@@ -16,6 +16,12 @@ export interface Metrics {
 	observedAt: string;
 }
 
+export interface ServiceLog {
+	timestamp: string;
+	level: "ERROR" | "WARN";
+	message: string;
+}
+
 export interface IncidentMemory {
 	id: string;
 	text: string;
@@ -50,6 +56,7 @@ export interface Analysis {
 export interface Investigation {
 	incident: Incident;
 	metrics: Metrics;
+	logs: ServiceLog[];
 	memories: IncidentMemory[];
 	analysis: Analysis;
 	status: "HYPOTHESIS";

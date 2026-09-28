@@ -21,6 +21,11 @@ test("incident and metrics endpoints return the investigation input", async () =
 		assert.equal(metrics.errorRate, 18.2);
 		assert.equal(metrics.redisLatency, 420);
 		assert.equal(metrics.redisConnectionPoolUsage, 100);
+		const logsResponse = await fetch(`${baseUrl}/api/tools/logs/payment-api`);
+		const logs = await logsResponse.json();
+		assert.equal(logs.source, "simulated demo tool");
+		assert.equal(logs.logs.length, 4);
+		assert.match(logs.logs[0].message, /Failed to acquire Redis connection/);
 
 		const statusResponse = await fetch(`${baseUrl}/api/status`);
 		const status = await statusResponse.json();
@@ -35,7 +40,7 @@ test("incident and metrics endpoints return the investigation input", async () =
 
 test("incident learning workflow recalls memory before and after resolution", async () => {
 	const retained: string[] = [];
-	const analysisInputs: Array<{ memories: Array<{ text: string }>; metrics: { redisConnectionPoolUsage: number } }> = [];
+	const analysisInputs: Array<{ memories: Array<{ text: string }>; metrics: { redisConnectionPoolUsage: number }; logs: Array<{ message: string }> }> = [];
 	const server = createApp({
 		memoryService: {
 			retainIncident: async (experience) => { retained.push(experience.incident.id); },
@@ -76,7 +81,10 @@ test("incident learning workflow recalls memory before and after resolution", as
 		assert.equal(afterSeed.memories.length, 1);
 		assert.match(afterSeed.memories[0].text, /Redis connection pool exhaustion/);
 		assert.equal(analysisInputs[1].metrics.redisConnectionPoolUsage, 100);
-		assert.deepEqual(afterSeed.trace.map((event: { id: string }) => event.id), ["metrics", "recall", "analysis"]);
+		assert.equal(afterSeed.logs.length, 4);
+		assert.match(afterSeed.logs[0].message, /Failed to acquire Redis connection/);
+		assert.equal(analysisInputs[1].logs.length, 4);
+		assert.deepEqual(afterSeed.trace.map((event: { id: string }) => event.id), ["metrics", "recall", "logs", "analysis"]);
 		assert.equal(afterSeed.trace.every((event: { status: string; durationMs: number }) => event.status === "completed" && event.durationMs >= 0), true);
 
 		const resolutionResponse = await fetch(`${baseUrl}/api/incidents/INC-001/resolve`, { method: "POST" });
@@ -123,7 +131,7 @@ test("investigation failures identify the failing provider and preserve complete
 		assert.equal(response.status, 503);
 		assert.equal(body.code, "GROQ_MODEL_UNAVAILABLE");
 		assert.equal(body.dependency, "llm");
-		assert.deepEqual(body.trace.map((event: { status: string }) => event.status), ["completed", "completed", "failed"]);
+		assert.deepEqual(body.trace.map((event: { status: string }) => event.status), ["completed", "completed", "completed", "failed"]);
 	} finally {
 		server.closeAllConnections();
 		await new Promise<void>((resolve, reject) => {
