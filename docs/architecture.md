@@ -18,4 +18,24 @@
 
 **Reason:** This keeps early work focused on the Hindsight integration and allows the backend boundaries to be tested independently.
 
-**Trade-offs:** A user-facing dashboard will arrive later; early demonstrations may use tests or a small development interface.
+**Trade-offs:** The React/Vite dashboard was deliberately deferred until the API, memory, and analysis workflow could be exercised independently. It is now layered over that backend workflow.
+
+## Hindsight stores incident experience, not app state
+
+**Context:** A repeatable demonstration needs persistent incident experience while its active incident and workflow state can remain simple.
+
+**Decision:** Store structured resolved incident knowledge through the Hindsight TypeScript client. Keep active incident state in the API process for this single-user prototype. Use stable, prototype-prefixed document IDs so reset can delete only this demo's documents.
+
+**Reason:** Recall must materially inform later reasoning, while reset must not erase unrelated memories in a shared bank.
+
+**Trade-offs:** Incident state is lost when the API restarts. Hindsight's API and its own extraction-model configuration must be reachable for live retention and recall.
+
+## Separate current evidence, memory, and hypotheses
+
+**Context:** A plausible prior cause must not be presented as a verified diagnosis for the current incident.
+
+**Decision:** The metrics tool supplies current evidence. Hindsight supplies labeled historical memories. Groq returns only a structured hypothesis, reasoning, recommendation, confidence, and uncertainty. The UI displays these categories separately.
+
+**Reason:** This makes the source of each claim visible and prevents the LLM from being the authority for tool observations or historical facts.
+
+**Trade-offs:** The model must support JSON-object output and is configured using `GROQ_MODEL`. Model output is schema-checked; malformed output fails the investigation rather than being displayed as valid analysis.
