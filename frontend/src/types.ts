@@ -23,6 +23,22 @@ export interface IncidentMemory {
 	context: string | null;
 }
 
+export interface TraceEvent {
+	id: string;
+	label: string;
+	detail: string;
+	status: "completed" | "failed";
+	durationMs: number;
+	occurredAt: string;
+}
+
+export interface SystemStatus {
+	hindsight: "connected" | "disconnected";
+	llm: "connected" | "disconnected";
+	metrics: "connected" | "disconnected";
+	agent: "ready" | "degraded";
+}
+
 export interface Analysis {
 	possibleRootCause: string;
 	reasoning: string;
@@ -37,6 +53,7 @@ export interface Investigation {
 	memories: IncidentMemory[];
 	analysis: Analysis;
 	status: "HYPOTHESIS";
+	trace: TraceEvent[];
 }
 
 export interface Resolution {
@@ -44,4 +61,16 @@ export interface Resolution {
 	before: Metrics;
 	after: Metrics;
 	retained: boolean;
+}
+
+export interface LearnResult {
+	retained: boolean;
+	incidentId: string;
+}
+
+export interface ApiFailure {
+	error: string;
+	code?: string;
+	dependency?: "hindsight" | "llm" | "metrics";
+	trace?: TraceEvent[];
 }
