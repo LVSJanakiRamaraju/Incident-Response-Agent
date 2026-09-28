@@ -10,6 +10,14 @@ export interface IncidentExperience {
 	lesson: string;
 	evidence?: ServiceMetrics;
 	investigation?: string[];
+	runbook?: ValidatedRunbook;
+}
+
+export interface ValidatedRunbook {
+	id: string;
+	title: string;
+	steps: string[];
+	outcome: string;
 }
 
 export interface IncidentMemory {
@@ -17,6 +25,11 @@ export interface IncidentMemory {
 	text: string;
 	type: string;
 	context: string | null;
+	metadata?: Record<string, string> | null;
+}
+
+export interface RunbookRecommendation extends ValidatedRunbook {
+	sourceIncidentIds: string[];
 }
 
 interface HindsightPort {
@@ -25,8 +38,8 @@ interface HindsightPort {
 	retain: (bankId: string, content: string, options?: { context?: string; metadata?: Record<string, string>; documentId?: string }) => Promise<unknown>;
 	listDocuments: (bankId: string, options?: { limit?: number; offset?: number }) => Promise<{ items: Array<{ id: string }>; total: number }>;
 	deleteDocument: (bankId: string, documentId: string) => Promise<void>;
-	recall: (bankId: string, query: string, options?: { budget?: "low" | "mid" | "high"; maxTokens?: number }) => Promise<{
-		results: Array<{ id: string; text: string; type?: string | null; context?: string | null }>;
+		recall: (bankId: string, query: string, options?: { budget?: "low" | "mid" | "high"; maxTokens?: number }) => Promise<{
+		results: Array<{ id: string; text: string; type?: string | null; context?: string | null; metadata?: Record<string, string> | null }>;
 	}>;
 }
 
@@ -43,6 +56,17 @@ export const historicalIncident: IncidentExperience = {
 	resolution: "Increase Redis connection pool size from 50 to 100",
 	outcome: "Error rate returned to normal",
 	lesson: "For Payment API 503 incidents with high Redis latency and pool saturation, investigate Redis connection pool exhaustion early.",
+	runbook: {
+		id: "payment-redis-pool-saturation",
+		title: "Payment API Redis pool saturation",
+		steps: [
+			"Verify Redis is reachable.",
+			"Check application Redis connection-pool utilization.",
+			"If the pool is saturated, increase its configured size in a controlled change.",
+			"Monitor HTTP 503 rate and Redis connection-acquisition latency after the change.",
+		],
+		outcome: "Validated in this incident: the 50-to-100 pool increase returned the error rate to normal.",
+	},
 	evidence: {
 		service: "payment-api",
 		errorRate: 18.2,
@@ -80,6 +104,9 @@ export class MemoryService {
 			`Resolution: ${experience.resolution}`,
 			`Outcome: ${experience.outcome}`,
 			`Lesson learned: ${experience.lesson}`,
+			experience.runbook ? `Validated runbook: ${experience.runbook.title}` : "",
+			experience.runbook ? `Runbook steps: ${experience.runbook.steps.join("; ")}` : "",
+			experience.runbook ? `Runbook outcome: ${experience.runbook.outcome}` : "",
 		].filter(Boolean).join("\n");
 
 		await this.client.retain(this.bankId, content, {
@@ -88,6 +115,13 @@ export class MemoryService {
 			metadata: {
 				incidentId: experience.incident.id,
 				service: experience.incident.service,
+				...(experience.runbook ? {
+					runbookId: experience.runbook.id,
+					runbookTitle: experience.runbook.title,
+					runbookSteps: JSON.stringify(experience.runbook.steps),
+					runbookOutcome: experience.runbook.outcome,
+					runbookStatus: "validated",
+				} : {}),
 			},
 		});
 	}
@@ -108,7 +142,7 @@ export class MemoryService {
 			`Current evidence: ${formatMetrics(metrics)}`,
 		].join("\n");
 		const response = await this.client.recall(this.bankId, query, { budget: "mid", maxTokens: 1800 });
-		return response.results.slice(0, 6).map(({ id, text, type, context }) => ({ id, text, type: type ?? "unknown", context: context ?? null }));
+		return response.results.slice(0, 6).map(({ id, text, type, context, metadata }) => ({ id, text, type: type ?? "unknown", context: context ?? null, metadata: metadata ?? null }));
 	}
 
 	private ensureBank(): Promise<void> {
@@ -139,4 +173,32 @@ function formatMetrics(metrics: ServiceMetrics): string {
 		`Redis latency ${metrics.redisLatency}ms`,
 		`Redis connection pool usage ${metrics.redisConnectionPoolUsage}%`,
 	].join(", ");
+}
+
+export function getRunbookRecommendations(memories: IncidentMemory[]): RunbookRecommendation[] {
+	const recommendations = new Map<string, RunbookRecommendation>();
+	for (const memory of memories) {
+		const metadata = memory.metadata;
+		if (!metadata || metadata.runbookStatus !== "validated" || !metadata.runbookId || !metadata.runbookTitle || !metadata.runbookSteps || !metadata.runbookOutcome) continue;
+		let steps: unknown;
+		try {
+			steps = JSON.parse(metadata.runbookSteps);
+		} catch {
+			continue;
+		}
+		if (!Array.isArray(steps) || !steps.every((step) => typeof step === "string")) continue;
+		const existing = recommendations.get(metadata.runbookId);
+		if (existing) {
+			if (metadata.incidentId && !existing.sourceIncidentIds.includes(metadata.incidentId)) existing.sourceIncidentIds.push(metadata.incidentId);
+			continue;
+		}
+		recommendations.set(metadata.runbookId, {
+			id: metadata.runbookId,
+			title: metadata.runbookTitle,
+			steps,
+			outcome: metadata.runbookOutcome,
+			sourceIncidentIds: metadata.incidentId ? [metadata.incidentId] : [],
+		});
+	}
+	return [...recommendations.values()];
 }

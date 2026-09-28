@@ -40,11 +40,12 @@ test("incident and metrics endpoints return the investigation input", async () =
 
 test("incident learning workflow recalls memory before and after resolution", async () => {
 	const retained: string[] = [];
+	const retainedExperiences: Array<{ incident: { id: string }; runbook?: { id: string } }> = [];
 	const analysisInputs: Array<{ memories: Array<{ text: string }>; metrics: { redisConnectionPoolUsage: number }; logs: Array<{ message: string }>; memoryMode: "enabled" | "disabled" }> = [];
 	let recallCalls = 0;
 	const server = createApp({
 		memoryService: {
-			retainIncident: async (experience) => { retained.push(experience.incident.id); },
+			retainIncident: async (experience) => { retained.push(experience.incident.id); retainedExperiences.push(experience); },
 			recallIncidents: async () => {
 				recallCalls += 1;
 				return retained.map((id) => ({
@@ -52,6 +53,7 @@ test("incident learning workflow recalls memory before and after resolution", as
 					text: id === "HIST-001" ? "Redis connection pool exhaustion caused Payment API 503 errors" : "Resolved recurring Payment API incident by increasing the Redis pool",
 					type: "experience",
 					context: "resolved production incident experience",
+					metadata: { incidentId: id, runbookId: "payment-redis-pool-saturation", runbookTitle: "Payment API Redis pool saturation", runbookSteps: JSON.stringify(["Check pool usage", "Increase pool if saturated"]), runbookOutcome: "503 rate normalized", runbookStatus: "validated" },
 				}));
 			},
 			resetDemoMemories: async () => { retained.length = 0; },
@@ -99,6 +101,9 @@ test("incident learning workflow recalls memory before and after resolution", as
 		assert.equal(analysisInputs[2].metrics.redisConnectionPoolUsage, 100);
 		assert.equal(afterSeed.logs.length, 4);
 		assert.match(afterSeed.logs[0].message, /Failed to acquire Redis connection/);
+		assert.equal(afterSeed.runbooks.length, 1);
+		assert.equal(afterSeed.runbooks[0].title, "Payment API Redis pool saturation");
+		assert.deepEqual(afterSeed.runbooks[0].sourceIncidentIds, ["HIST-001"]);
 		assert.equal(analysisInputs[2].logs.length, 4);
 		assert.equal(analysisInputs[2].memoryMode, "enabled");
 		assert.equal(recallCalls, 2);
@@ -115,11 +120,13 @@ test("incident learning workflow recalls memory before and after resolution", as
 		assert.equal(learnResponse.status, 200);
 		assert.equal((await learnResponse.json()).retained, true);
 		assert.deepEqual(retained, ["HIST-001", "INC-001"]);
+		assert.equal(retainedExperiences[1].runbook?.id, "payment-redis-pool-saturation");
 
 		const nextIncident = await (await fetch(`${baseUrl}/api/incidents/new`, { method: "POST" })).json();
 		assert.equal(nextIncident.id, "INC-002");
 		const nextInvestigation = await (await investigate("INC-002")).json();
 		assert.equal(nextInvestigation.memories.length, 2);
+		assert.deepEqual(nextInvestigation.runbooks[0].sourceIncidentIds, ["HIST-001", "INC-001"]);
 	} finally {
 		server.closeAllConnections();
 		await new Promise<void>((resolve, reject) => {

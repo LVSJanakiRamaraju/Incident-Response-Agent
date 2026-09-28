@@ -27,6 +27,15 @@ export interface IncidentMemory {
 	text: string;
 	type: string;
 	context: string | null;
+	metadata?: Record<string, string> | null;
+}
+
+export interface RunbookRecommendation {
+	id: string;
+	title: string;
+	steps: string[];
+	outcome: string;
+	sourceIncidentIds: string[];
 }
 
 export interface TraceEvent {
@@ -58,6 +67,7 @@ export interface Investigation {
 	metrics: Metrics;
 	logs: ServiceLog[];
 	memories: IncidentMemory[];
+	runbooks: RunbookRecommendation[];
 	memoryMode: "enabled" | "disabled";
 	analysis: Analysis;
 	status: "HYPOTHESIS";

@@ -1,6 +1,6 @@
 import express from "express";
 import { demoIncident } from "./incidents/incident.js";
-import { historicalIncident, MemoryService, createMemoryServiceFromEnv, type IncidentExperience } from "./memory/memory.service.js";
+import { getRunbookRecommendations, historicalIncident, MemoryService, createMemoryServiceFromEnv, type IncidentExperience } from "./memory/memory.service.js";
 import { AnalysisService, createAnalysisServiceFromEnv, type AnalysisInput, type IncidentAnalysis } from "./llm/analysis.service.js";
 import { getMetrics, getResolvedMetrics, type ServiceMetrics } from "./tools/metrics.js";
 import { getRecentLogs, type ServiceLogEntry } from "./tools/logs.js";
@@ -127,7 +127,8 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 		}
 		trace.push({ id: "analysis", label: "Agent analysis generated", detail: "Current evidence and recalled memories were supplied to the model.", status: "completed", durationMs: Date.now() - analysisStarted, occurredAt: new Date().toISOString() });
 		lastInvestigation = { incidentId: currentIncident.id, metrics, analysis };
-		response.json({ incident: currentIncident, metrics, logs, memories, analysis, memoryMode, status: "HYPOTHESIS", trace });
+		const runbooks = getRunbookRecommendations(memories);
+		response.json({ incident: currentIncident, metrics, logs, memories, runbooks, analysis, memoryMode, status: "HYPOTHESIS", trace });
 	});
 
 	app.post("/api/incidents/:id/resolve", async (request, response) => {
@@ -150,6 +151,7 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 			lesson: "For Payment API 503 incidents with high Redis latency and pool saturation, investigate Redis connection pool exhaustion early.",
 			evidence: lastInvestigation.metrics,
 			investigation: [lastInvestigation.analysis.recommendedNextAction],
+			runbook: historicalIncident.runbook,
 		};
 		currentIncident = resolvedIncident;
 		experienceRetained = false;
