@@ -24,7 +24,7 @@ test("retains structured incident experience through the Hindsight client contra
 	assert.match(calls[0].content, /Increase Redis connection pool size from 50 to 100/);
 	assert.match(calls[0].content, /Lesson learned:/);
 	assert.match(calls[0].content, /Validated runbook: Payment API Redis pool saturation/);
-	assert.equal(calls[0].options?.metadata?.runbookStatus, "validated");
+	assert.equal(calls[0].options?.metadata?.runbookStatus, "verified");
 	assert.equal(calls[0].options?.metadata?.runbookId, "payment-redis-pool-saturation");
 });
 

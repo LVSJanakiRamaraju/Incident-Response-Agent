@@ -62,12 +62,46 @@ export interface Analysis {
 	uncertainty: string;
 }
 
+export interface SolutionAttempt {
+	id: string;
+	recommendation: string;
+	result: "VERIFIED" | "FAILED" | "PARTIAL";
+	attemptedAt: string;
+	feedbackAt: string;
+	evidenceBefore: Metrics;
+	evidenceAfter: Metrics;
+	retained?: boolean;
+}
+
+export interface AppliedSolution {
+	incident: Incident;
+	status: "AWAITING_CONFIRMATION";
+	solutionId: string;
+	recommendation: string;
+	before: Metrics;
+	expectedAfter: Metrics;
+}
+
+export type SolutionFeedback = "SUCCESS" | "FAILED" | "PARTIAL";
+
+export interface SolutionFeedbackResponse {
+	incident: Incident;
+	attempt: SolutionAttempt;
+	attempts: SolutionAttempt[];
+	retained: boolean;
+	continueInvestigation?: boolean;
+	retentionError?: string;
+	before?: Metrics;
+	after?: Metrics;
+}
+
 export interface Investigation {
 	incident: Incident;
 	metrics: Metrics;
 	logs: ServiceLog[];
 	memories: IncidentMemory[];
 	runbooks: RunbookRecommendation[];
+	priorSolutionAttempts: SolutionAttempt[];
 	memoryMode: "enabled" | "disabled";
 	analysis: Analysis;
 	status: "HYPOTHESIS";

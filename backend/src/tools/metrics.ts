@@ -36,3 +36,19 @@ export function getResolvedMetrics(service: string): ServiceMetrics {
 		observedAt: new Date().toISOString(),
 	};
 }
+
+export function getPartialMetrics(service: string): ServiceMetrics {
+	if (service !== "payment-api") {
+		throw new Error(`Metrics are unavailable for service: ${service}`);
+	}
+
+	return {
+		service,
+		errorRate: 8.1,
+		latencyP95: 510,
+		redisLatency: 165,
+		redisConnectionPoolUsage: 76,
+		observedAt: new Date().toISOString(),
+	};
+}
+

@@ -1,4 +1,4 @@
-import type { ApiFailure, Incident, Investigation, LearnResult, Resolution, SystemStatus } from "./types";
+import type { ApiFailure, AppliedSolution, Incident, Investigation, LearnResult, SolutionFeedback, SolutionFeedbackResponse, SystemStatus } from "./types";
 
 export class ApiError extends Error {
 	constructor(readonly failure: ApiFailure) {
@@ -25,7 +25,12 @@ export const api = {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(options ?? {}),
 	}),
-	resolve: (id: string) => request<Resolution>(`/api/incidents/${id}/resolve`, { method: "POST" }),
+	applySolution: (id: string) => request<AppliedSolution>(`/api/incidents/${id}/apply-solution`, { method: "POST" }),
+	submitSolutionFeedback: (id: string, result: SolutionFeedback) => request<SolutionFeedbackResponse>(`/api/incidents/${id}/solution-feedback`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ result }),
+	}),
 	learn: (id: string) => request<LearnResult>(`/api/incidents/${id}/learn`, { method: "POST" }),
 	newIncident: () => request<Incident>("/api/incidents/new", { method: "POST" }),
 	resetDemo: () => request<{ reset: boolean; incident: Incident }>("/api/demo/reset", { method: "POST" }),

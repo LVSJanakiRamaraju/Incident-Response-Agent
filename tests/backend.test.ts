@@ -40,20 +40,20 @@ test("incident and metrics endpoints return the investigation input", async () =
 
 test("incident learning workflow recalls memory before and after resolution", async () => {
 	const retained: string[] = [];
-	const retainedExperiences: Array<{ incident: { id: string }; runbook?: { id: string } }> = [];
-	const analysisInputs: Array<{ memories: Array<{ text: string }>; metrics: { redisConnectionPoolUsage: number }; logs: Array<{ message: string }>; memoryMode: "enabled" | "disabled" }> = [];
+	const retainedExperiences: Array<{ incident: { id: string }; verificationStatus?: string; userConfirmed?: boolean; runbook?: { id: string }; attemptId?: string }> = [];
+	const analysisInputs: Array<{ memories: Array<{ text: string }>; metrics: { redisConnectionPoolUsage: number; errorRate: number }; logs: Array<{ message: string }>; memoryMode: "enabled" | "disabled"; priorSolutionAttempts: Array<{ result: string; recommendation: string }> }> = [];
 	let recallCalls = 0;
 	const server = createApp({
 		memoryService: {
 			retainIncident: async (experience) => { retained.push(experience.incident.id); retainedExperiences.push(experience); },
 			recallIncidents: async () => {
 				recallCalls += 1;
-				return retained.map((id) => ({
-					id,
-					text: id === "HIST-001" ? "Redis connection pool exhaustion caused Payment API 503 errors" : "Resolved recurring Payment API incident by increasing the Redis pool",
+				return retainedExperiences.map((experience, index) => ({
+					id: `memory-${index}`,
+					text: experience.verificationStatus === "FAILED" ? "Increasing the Redis pool did not resolve this incident" : experience.verificationStatus === "PARTIAL" ? "Increasing the Redis pool reduced errors but did not fully resolve the incident" : "Redis connection pool exhaustion caused Payment API 503 errors; increasing the pool resolved the incident",
 					type: "experience",
 					context: "resolved production incident experience",
-					metadata: { incidentId: id, runbookId: "payment-redis-pool-saturation", runbookTitle: "Payment API Redis pool saturation", runbookSteps: JSON.stringify(["Check pool usage", "Increase pool if saturated"]), runbookOutcome: "503 rate normalized", runbookStatus: "validated" },
+					metadata: { incidentId: experience.incident.id, runbookId: "payment-api-redis-pool-saturation", runbookTitle: "Payment API Redis pool saturation", runbookSteps: JSON.stringify(["Check pool usage", "Increase pool if saturated"]), runbookOutcome: "503 rate normalized", runbookStatus: (experience.verificationStatus ?? "VERIFIED").toLowerCase() },
 				}));
 			},
 			resetDemoMemories: async () => { retained.length = 0; },
@@ -110,22 +110,56 @@ test("incident learning workflow recalls memory before and after resolution", as
 		assert.deepEqual(afterSeed.trace.map((event: { id: string }) => event.id), ["metrics", "recall", "logs", "analysis"]);
 		assert.equal(afterSeed.trace.every((event: { status: string; durationMs: number }) => event.status === "completed" && event.durationMs >= 0), true);
 
-		const resolutionResponse = await fetch(`${baseUrl}/api/incidents/INC-001/resolve`, { method: "POST" });
-		const resolution = await resolutionResponse.json();
-		assert.equal(resolution.retained, false);
-		assert.equal(resolution.after.errorRate, 0.3);
-		assert.deepEqual(retained, ["HIST-001"]);
+		const applySolution = () => fetch(`${baseUrl}/api/incidents/INC-001/apply-solution`, { method: "POST" });
+		const submitFeedback = (result: "SUCCESS" | "FAILED" | "PARTIAL") => fetch(`${baseUrl}/api/incidents/INC-001/solution-feedback`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ result }),
+		});
 
-		const learnResponse = await fetch(`${baseUrl}/api/incidents/INC-001/learn`, { method: "POST" });
-		assert.equal(learnResponse.status, 200);
-		assert.equal((await learnResponse.json()).retained, true);
+		const firstApplied = await (await applySolution()).json();
+		assert.equal(firstApplied.status, "AWAITING_CONFIRMATION");
+		assert.equal(firstApplied.incident.status, "ACTIVE");
+		assert.deepEqual(retained, ["HIST-001"]);
+		const failed = await (await submitFeedback("FAILED")).json();
+		assert.equal(failed.attempt.result, "FAILED");
+		assert.equal(failed.incident.status, "ACTIVE");
+		assert.equal(failed.attempt.retained, true);
 		assert.deepEqual(retained, ["HIST-001", "INC-001"]);
-		assert.equal(retainedExperiences[1].runbook?.id, "payment-redis-pool-saturation");
+		assert.equal(retainedExperiences[1].verificationStatus, "FAILED");
+		assert.equal(retainedExperiences[1].userConfirmed, false);
+
+		const afterFailure = await (await investigate("INC-001")).json();
+		assert.equal(afterFailure.priorSolutionAttempts[0].result, "FAILED");
+		assert.match(analysisInputs[3].priorSolutionAttempts[0].recommendation, /Increase the Redis pool/);
+		assert.equal(afterFailure.runbooks.length, 1);
+
+		await applySolution();
+		const partial = await (await submitFeedback("PARTIAL")).json();
+		assert.equal(partial.attempt.result, "PARTIAL");
+		assert.equal(partial.attempt.evidenceAfter.errorRate, 8.1);
+		assert.equal(partial.incident.status, "ACTIVE");
+		assert.equal(retainedExperiences[2].verificationStatus, "PARTIAL");
+
+		const afterPartial = await (await investigate("INC-001")).json();
+		assert.equal(afterPartial.metrics.errorRate, 8.1);
+		assert.deepEqual(afterPartial.priorSolutionAttempts.map((attempt: { result: string }) => attempt.result), ["FAILED", "PARTIAL"]);
+		assert.equal(afterPartial.runbooks.length, 1);
+
+		await applySolution();
+		const resolved = await (await submitFeedback("SUCCESS")).json();
+		assert.equal(resolved.attempt.result, "VERIFIED");
+		assert.equal(resolved.incident.status, "RESOLVED");
+		assert.equal(resolved.retained, true);
+		assert.deepEqual(retained, ["HIST-001", "INC-001", "INC-001", "INC-001"]);
+		assert.equal(retainedExperiences[3].verificationStatus, "VERIFIED");
+		assert.equal(retainedExperiences[3].userConfirmed, true);
+		assert.equal(retainedExperiences[3].runbook?.id, "payment-api-redis-pool-saturation");
 
 		const nextIncident = await (await fetch(`${baseUrl}/api/incidents/new`, { method: "POST" })).json();
 		assert.equal(nextIncident.id, "INC-002");
 		const nextInvestigation = await (await investigate("INC-002")).json();
-		assert.equal(nextInvestigation.memories.length, 2);
+		assert.equal(nextInvestigation.memories.length, 4);
 		assert.deepEqual(nextInvestigation.runbooks[0].sourceIncidentIds, ["HIST-001", "INC-001"]);
 	} finally {
 		server.closeAllConnections();

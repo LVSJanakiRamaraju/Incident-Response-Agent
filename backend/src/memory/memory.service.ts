@@ -4,6 +4,9 @@ import { ServiceMetrics } from "../tools/metrics.js";
 
 export interface IncidentExperience {
 	incident: Incident;
+	attemptId?: string;
+	verificationStatus?: "VERIFIED" | "FAILED" | "PARTIAL";
+	userConfirmed?: boolean;
 	rootCause: string;
 	resolution: string;
 	outcome: string;
@@ -103,6 +106,8 @@ export class MemoryService {
 			`Root cause: ${experience.rootCause}`,
 			`Resolution: ${experience.resolution}`,
 			`Outcome: ${experience.outcome}`,
+			`Solution verification: ${experience.verificationStatus ?? "VERIFIED"}`,
+			experience.userConfirmed === undefined ? "" : `User confirmed resolution: ${experience.userConfirmed ? "YES" : "NO"}`,
 			`Lesson learned: ${experience.lesson}`,
 			experience.runbook ? `Validated runbook: ${experience.runbook.title}` : "",
 			experience.runbook ? `Runbook steps: ${experience.runbook.steps.join("; ")}` : "",
@@ -111,16 +116,18 @@ export class MemoryService {
 
 		await this.client.retain(this.bankId, content, {
 			context: "resolved production incident experience",
-			documentId: `bugslayers-demo-${experience.incident.id}`,
+			documentId: `bugslayers-demo-${experience.incident.id}${experience.attemptId ? `-attempt-${experience.attemptId}` : ""}`,
 			metadata: {
 				incidentId: experience.incident.id,
 				service: experience.incident.service,
+				verificationStatus: experience.verificationStatus ?? "VERIFIED",
+				...(experience.userConfirmed === undefined ? {} : { userConfirmed: experience.userConfirmed ? "true" : "false" }),
 				...(experience.runbook ? {
 					runbookId: experience.runbook.id,
 					runbookTitle: experience.runbook.title,
 					runbookSteps: JSON.stringify(experience.runbook.steps),
 					runbookOutcome: experience.runbook.outcome,
-					runbookStatus: "validated",
+					runbookStatus: (experience.verificationStatus ?? "VERIFIED").toLowerCase(),
 				} : {}),
 			},
 		});
@@ -179,7 +186,7 @@ export function getRunbookRecommendations(memories: IncidentMemory[]): RunbookRe
 	const recommendations = new Map<string, RunbookRecommendation>();
 	for (const memory of memories) {
 		const metadata = memory.metadata;
-		if (!metadata || metadata.runbookStatus !== "validated" || !metadata.runbookId || !metadata.runbookTitle || !metadata.runbookSteps || !metadata.runbookOutcome) continue;
+		if (!metadata || !["validated", "verified"].includes(metadata.runbookStatus ?? "") || !metadata.runbookId || !metadata.runbookTitle || !metadata.runbookSteps || !metadata.runbookOutcome) continue;
 		let steps: unknown;
 		try {
 			steps = JSON.parse(metadata.runbookSteps);

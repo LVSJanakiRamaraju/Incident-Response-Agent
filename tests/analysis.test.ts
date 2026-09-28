@@ -26,6 +26,7 @@ test("analysis receives current tool evidence and Hindsight memories as distinct
 		logs: getRecentLogs("payment-api"),
 		memories: [{ id: "memory-1", text: historicalIncident.lesson, type: "experience", context: "resolved incident" }],
 		memoryMode: "enabled",
+		priorSolutionAttempts: [],
 	});
 
 	assert.match(prompts, /redisConnectionPoolUsage/);
@@ -40,7 +41,7 @@ test("analysis receives current tool evidence and Hindsight memories as distinct
 test("analysis rejects malformed model output", async () => {
 	const service = new AnalysisService({ complete: async () => "not-json" });
 	await assert.rejects(
-		service.analyze({ incident: demoIncident, metrics: getMetrics("payment-api"), logs: getRecentLogs("payment-api"), memories: [], memoryMode: "enabled" }),
+		service.analyze({ incident: demoIncident, metrics: getMetrics("payment-api"), logs: getRecentLogs("payment-api"), memories: [], memoryMode: "enabled", priorSolutionAttempts: [] }),
 		/The LLM returned invalid JSON/,
 	);
 });
@@ -60,7 +61,7 @@ test("baseline analysis explicitly tells the model that Hindsight was skipped", 
 		},
 	});
 
-	await service.analyze({ incident: demoIncident, metrics: getMetrics("payment-api"), logs: getRecentLogs("payment-api"), memories: [], memoryMode: "disabled" });
+	await service.analyze({ incident: demoIncident, metrics: getMetrics("payment-api"), logs: getRecentLogs("payment-api"), memories: [], memoryMode: "disabled", priorSolutionAttempts: [] });
 
 	assert.match(prompts, /no-memory baseline/);
 	assert.match(prompts, /Hindsight recall was intentionally skipped/);

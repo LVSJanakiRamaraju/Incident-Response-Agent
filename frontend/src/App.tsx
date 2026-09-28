@@ -24,9 +24,9 @@ import {
 	X,
 } from "lucide-react";
 import { ApiError, api } from "./api";
-import type { ApiFailure, Incident, IncidentMemory, Investigation, Resolution, SystemStatus, TraceEvent } from "./types";
+import type { ApiFailure, AppliedSolution, Incident, IncidentMemory, Investigation, Resolution, SolutionAttempt, SolutionFeedback, SystemStatus, TraceEvent } from "./types";
 
-type BusyAction = "investigate" | "seed" | "resolve" | "learn" | "new" | "reset" | "demo";
+type BusyAction = "investigate" | "seed" | "apply" | "feedback" | "learn" | "new" | "reset" | "demo";
 type TimelineItem = TraceEvent | { id: string; label: string; detail: string; status: "pending"; durationMs: 0; occurredAt: string };
 type DrawerState =
 	| { kind: "memory"; memory: IncidentMemory }
@@ -37,6 +37,9 @@ export function App() {
 	const [investigation, setInvestigation] = useState<Investigation>();
 	const [baselineInvestigation, setBaselineInvestigation] = useState<Investigation>();
 	const [resolution, setResolution] = useState<Resolution>();
+	const [pendingSolution, setPendingSolution] = useState<AppliedSolution>();
+	const [solutionAttempts, setSolutionAttempts] = useState<SolutionAttempt[]>([]);
+	const [feedbackChoice, setFeedbackChoice] = useState<SolutionFeedback>();
 	const [learned, setLearned] = useState(false);
 	const [trace, setTrace] = useState<TimelineItem[]>([]);
 	const [status, setStatus] = useState<SystemStatus>();
@@ -117,6 +120,8 @@ export function App() {
 		void perform("investigate", "Agent is querying metrics, Hindsight, and the analysis model…", () => api.investigate(incident.id), (result) => {
 			setIncident(result.incident);
 			setInvestigation(result);
+			setSolutionAttempts(result.priorSolutionAttempts);
+			setPendingSolution(undefined);
 			setResolution(undefined);
 			setLearned(false);
 			setTrace(result.trace);
@@ -135,6 +140,8 @@ export function App() {
 		setBaselineInvestigation(undefined);
 		setInvestigation(undefined);
 		setResolution(undefined);
+		setPendingSolution(undefined);
+		setSolutionAttempts([]);
 		setLearned(false);
 		setTrace([{ id: "baseline", label: "No-memory baseline started", detail: "Hindsight recall is explicitly disabled for this run.", status: "pending", durationMs: 0, occurredAt: new Date().toISOString() }]);
 		try {
@@ -172,14 +179,40 @@ export function App() {
 		}
 	}
 
-	function resolveIncident() {
+	function applySolution() {
 		if (!incident) return;
-		void perform("resolve", "Applying the simulated pool change and checking recovery metrics…", () => api.resolve(incident.id), (result, durationMs) => {
-			setIncident(result.incident);
-			setResolution(result);
+		void perform("apply", "Applying the simulated fix and collecting test evidence…", () => api.applySolution(incident.id), (result, durationMs) => {
+			setPendingSolution(result);
+			setTrace((current) => [...current, localEvent("solution-applied", "Simulated solution applied", `Expected HTTP 503 rate ${result.before.errorRate}% → ${result.expectedAfter.errorRate}%; awaiting confirmation`, durationMs)]);
+			setNotice("The simulated change is applied. The incident remains ACTIVE until you confirm the outcome.");
+		});
+	}
+
+	function confirmSolution(result: SolutionFeedback) {
+		if (!incident || !pendingSolution) return;
+		setFeedbackChoice(result);
+		const message = result === "SUCCESS" ? "Recording your confirmation and retaining the verified experience…" : result === "FAILED" ? "Recording the failed attempt so the agent can investigate again…" : "Recording partial recovery and updating current evidence…";
+		void perform("feedback", message, () => api.submitSolutionFeedback(incident.id, result), (response, durationMs) => {
+			setIncident(response.incident);
+			setSolutionAttempts(response.attempts);
+			setFeedbackChoice(undefined);
+			setPendingSolution(undefined);
+			setTrace((current) => [...current, localEvent(`feedback-${result.toLowerCase()}`, `User confirmed ${result.toLowerCase()} outcome`, response.retentionError ?? (response.retained ? "Verified experience retained in Hindsight" : "Not stored as a verified successful solution"), durationMs)]);
+			if (result === "SUCCESS") {
+				const before = response.before ?? pendingSolution.before;
+				const after = response.after ?? pendingSolution.expectedAfter;
+				setResolution({ incident: response.incident, before, after, retained: response.retained });
+				setLearned(response.retained);
+				setNotice(response.retentionError ?? (response.retained ? "You confirmed the fix. The incident is resolved and the verified experience was retained in Hindsight." : "You confirmed the fix. The incident is resolved; save its experience to Hindsight."));
+				return;
+			}
+			setInvestigation(undefined);
+			setBaselineInvestigation(undefined);
+			setResolution(undefined);
+			setPendingSolution(undefined);
+			setSolutionAttempts([]);
 			setLearned(false);
-			setTrace((current) => [...current, localEvent("resolve", "Simulated resolution applied", `Error rate ${result.before.errorRate}% → ${result.after.errorRate}%`, durationMs)]);
-			setNotice("The simulated incident is resolved. Review and save the experience as a separate step.");
+			setNotice(result === "FAILED" ? "Solution marked FAILED, not verified. Investigate again; the agent will be told not to repeat it." : "Partial improvement recorded as PARTIAL, not verified. Investigate again with the updated evidence.");
 		});
 	}
 
@@ -198,6 +231,8 @@ export function App() {
 			setInvestigation(undefined);
 			setBaselineInvestigation(undefined);
 			setResolution(undefined);
+			setPendingSolution(undefined);
+			setSolutionAttempts([]);
 			setLearned(false);
 			setTrace([localEvent("intake", "Follow-up incident created", nextIncident.id, 0)]);
 			setNotice("Follow-up incident is ready. Investigate to recall the stored experience.");
@@ -233,7 +268,8 @@ export function App() {
 	function retryFailedAction() {
 		if (retryAction === "investigate") investigate();
 		if (retryAction === "seed") seedMemory();
-		if (retryAction === "resolve") resolveIncident();
+		if (retryAction === "apply") applySolution();
+		if (retryAction === "feedback" && feedbackChoice) confirmSolution(feedbackChoice);
 		if (retryAction === "learn") learnFromIncident();
 		if (retryAction === "new") createFollowUp();
 		if (retryAction === "reset") resetDemo();
@@ -273,7 +309,7 @@ export function App() {
 						(key === "investigate" && trace.some((event) => event.id === "metrics" && event.status === "failed")) ||
 						(key === "analyze" && trace.some((event) => event.id === "analysis" && event.status === "failed")) ||
 						(key === "learn" && retryAction === "learn" && Boolean(failure));
-					const current = !done && !failed && (busy === "investigate" && index === 2 || busy === "resolve" && index === 4 || busy === "learn" && index === 5);
+					const current = !done && !failed && (busy === "investigate" && index === 2 || (busy === "apply" || busy === "feedback" || pendingSolution) && index === 4 || busy === "learn" && index === 5);
 					const labelText = failed ? "FAILED" : done ? "COMPLETED" : current ? "ACTIVE" : "WAITING";
 					return <div className={`lifecycle-step ${done ? "is-complete" : ""} ${current ? "is-current" : ""} ${failed ? "is-failed" : ""}`} key={key}><span className="step-marker">{done ? <Check size={13} /> : failed ? <X size={12} /> : current ? <LoaderCircle className="spin" size={13} /> : `0${index + 1}`}</span><span className="step-copy"><strong>{label}</strong><small>{labelText}</small></span>{index < 5 && <span className="step-link" />}</div>;
 				})}
@@ -304,6 +340,8 @@ export function App() {
 				</section>
 			</div>
 
+			{solutionAttempts.length > 0 && <section className="panel attempt-history-panel"><div className="panel-title"><span className="panel-icon icon-analysis"><Clock3 size={16} /></span><div><p className="eyebrow">SOLUTION FEEDBACK</p><h2>Previous attempts · not all are verified</h2></div></div><div className="attempt-history-list">{solutionAttempts.map((attempt) => <article className={`attempt-history-row attempt-${attempt.result.toLowerCase()}`} key={attempt.id}><span className="attempt-result">{attempt.result === "VERIFIED" ? <Check size={13} /> : attempt.result === "FAILED" ? <X size={13} /> : <AlertTriangle size={13} />}{attempt.result}</span><span className="attempt-description"><strong>{attempt.recommendation}</strong><small>503 {attempt.evidenceBefore.errorRate}% → {attempt.evidenceAfter.errorRate}% · Redis {attempt.evidenceBefore.redisLatency}ms → {attempt.evidenceAfter.redisLatency}ms</small></span><span className="attempt-persistence">{attempt.retained ? "RETAINED · UNVERIFIED" : "SESSION HISTORY"}</span></article>)}</div></section>}
+
 			{baselineInvestigation && investigation?.memoryMode === "enabled" && <section className="panel memory-comparison" aria-labelledby="comparison-title"><div className="panel-title"><span className="panel-icon icon-analysis"><Layers3 size={17} /></span><div><p className="eyebrow">BEFORE / AFTER HINDSIGHT</p><h2 id="comparison-title">What changed when the agent used memory?</h2></div><span className="comparison-run-tag">SAME INCIDENT · TWO ACTUAL RUNS</span></div><div className="comparison-grid"><article className="comparison-side no-memory"><p><CircleDot size={13} /> BASELINE · HINDSIGHT SKIPPED</p><h3>{baselineInvestigation.analysis.possibleRootCause}</h3><span>Memories passed to model: {baselineInvestigation.memories.length}</span><p>{baselineInvestigation.analysis.reasoning}</p></article><div className="comparison-arrow"><ArrowRight size={17} /></div><article className="comparison-side with-memory"><p><Database size={13} /> HINDSIGHT ENABLED · {investigation.memories.length} MEMORIES RETURNED</p><h3>{investigation.analysis.possibleRootCause}</h3><span>Historical evidence was supplied separately from current metrics and logs.</span><p>{investigation.analysis.reasoning}</p>{investigation.memories[0] && <blockquote>{investigation.memories[0].text}</blockquote>}</article></div><small className="comparison-footnote">These are two real model responses. The display reports observed outputs only; it does not claim an accuracy or MTTR improvement.</small></section>}
 
 			<div className="agent-grid">
@@ -322,10 +360,12 @@ export function App() {
 
 			<section className="panel analysis-panel" id="analysis">
 				<div className="panel-title"><span className="panel-icon icon-analysis"><Sparkles size={17} /></span><div><p className="eyebrow">04 / REASONING</p><h2>Agent analysis</h2></div>{investigation && <span className="hypothesis-badge"><CircleDot size={12} /> HYPOTHESIS · NOT CONFIRMED</span>}</div>
-				{investigation ? <div className="analysis-content"><div className="analysis-primary"><small className="analysis-label">POSSIBLE ROOT CAUSE</small><h3>{investigation.analysis.possibleRootCause}</h3><p>{investigation.analysis.uncertainty}</p><div className="recommendation"><Wrench size={15} /><div><small>RECOMMENDED NEXT ACTION · {investigation.analysis.confidence.toUpperCase()} CONFIDENCE</small><p>{investigation.analysis.recommendedNextAction}</p></div></div></div><div className="analysis-evidence"><AnalysisEvidence title="Current evidence" tone="fact"><ul><li>Error rate: {investigation.metrics.errorRate}%</li><li>Redis latency: {investigation.metrics.redisLatency}ms</li><li>Pool utilization: {investigation.metrics.redisConnectionPoolUsage}%</li><li>Request latency p95: {investigation.metrics.latencyP95}ms</li></ul></AnalysisEvidence><AnalysisEvidence title="Historical evidence" tone="history">{investigation.memories.length ? <ul>{investigation.memories.slice(0, 3).map((memory) => <li key={memory.id}>{memory.text}</li>)}</ul> : <p>No historical memory was returned for this incident.</p>}</AnalysisEvidence><AnalysisEvidence title="Model reasoning" tone="hypothesis"><p>{investigation.analysis.reasoning}</p></AnalysisEvidence></div></div> : <div className="analysis-placeholder"><Sparkles size={19} /><p>Run an investigation to compare current metrics with recalled organizational experience and form a hypothesis.</p></div>}
+				{investigation ? <div className="analysis-content"><div className="analysis-primary"><small className="analysis-label">POSSIBLE ROOT CAUSE</small><h3>{investigation.analysis.possibleRootCause}</h3><p>{investigation.analysis.uncertainty}</p><div className="recommendation"><Wrench size={15} /><div><small>RECOMMENDED NEXT ACTION · {investigation.analysis.confidence.toUpperCase()} CONFIDENCE</small><p>{investigation.analysis.recommendedNextAction}</p></div></div></div><div className="analysis-evidence"><AnalysisEvidence title="Current evidence" tone="fact"><ul><li>Error rate: {investigation.metrics.errorRate}%</li><li>Redis latency: {investigation.metrics.redisLatency}ms</li><li>Pool utilization: {investigation.metrics.redisConnectionPoolUsage}%</li><li>Request latency p95: {investigation.metrics.latencyP95}ms</li></ul></AnalysisEvidence><AnalysisEvidence title="Historical evidence" tone="history">{investigation.memories.length ? <ul>{investigation.memories.slice(0, 3).map((memory) => <li key={memory.id}>{memory.text}</li>)}</ul> : <p>No historical memory was returned for this incident.</p>}</AnalysisEvidence><AnalysisEvidence title="Model reasoning" tone="hypothesis"><p>{investigation.analysis.reasoning}</p></AnalysisEvidence>{investigation.priorSolutionAttempts.length > 0 && <AnalysisEvidence title="Previous solution attempts" tone="hypothesis"><ul>{investigation.priorSolutionAttempts.map((attempt) => <li key={attempt.id}>{attempt.result}: {attempt.recommendation}</li>)}</ul></AnalysisEvidence>}</div></div> : <div className="analysis-placeholder"><Sparkles size={19} /><p>Run an investigation to compare current metrics with recalled organizational experience and form a hypothesis.</p></div>}
 	</section>
 
-			{investigation && active && !resolution && <section className="panel resolve-panel" id="resolve"><div className="panel-title"><span className="panel-icon icon-learning"><Wrench size={17} /></span><div><p className="eyebrow">05 / OPERATOR ACTION</p><h2>Resolve incident</h2></div><span className="demo-tag">SIMULATED FIX</span></div><div className="resolve-action-grid"><div><small>RECOMMENDED BY AGENT</small><p>{investigation.analysis.recommendedNextAction}</p></div><div className="pool-change"><small>DEMO CONFIGURATION</small><strong>Pool size <span>50</span><ArrowRight size={14} /><span>100</span></strong></div><div><small>EXPECTED OUTCOME</small><p>Reduce connection saturation and observe recovery metrics. No real infrastructure is changed.</p></div></div><button className="button button-primary apply-fix" onClick={resolveIncident} disabled={busyNow}>{busy === "resolve" ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}{busy === "resolve" ? "Applying simulated fix…" : "Apply simulated fix"}<ChevronRight size={14} /></button></section>}
+			{investigation && active && !resolution && !pendingSolution && <section className="panel resolve-panel" id="resolve"><div className="panel-title"><span className="panel-icon icon-learning"><Wrench size={17} /></span><div><p className="eyebrow">05 / OPERATOR ACTION</p><h2>Recommended solution</h2></div><span className="demo-tag">SIMULATED FIX</span></div><div className="resolve-action-grid"><div><small>RECOMMENDED BY AGENT</small><p>{investigation.analysis.recommendedNextAction}</p></div><div className="pool-change"><small>DEMO CONFIGURATION</small><strong>Pool size <span>50</span><ArrowRight size={14} /><span>100</span></strong></div><div><small>EXPECTED OUTCOME</small><p>Test the change and check current error-rate and Redis evidence. This does not modify real infrastructure.</p></div></div><button className="button button-primary apply-fix" onClick={applySolution} disabled={busyNow}>{busy === "apply" ? <LoaderCircle className="spin" size={15} /> : <Wrench size={15} />}{busy === "apply" ? "Applying simulated solution…" : "Apply / test solution"}<ChevronRight size={14} /></button></section>}
+
+			{pendingSolution && <section className="panel solution-confirmation" aria-labelledby="solution-confirm-title"><div className="panel-title"><span className="panel-icon icon-analysis"><CircleDot size={17} /></span><div><p className="eyebrow">SOLUTION ATTEMPT / {pendingSolution.solutionId}</p><h2 id="solution-confirm-title">Did this resolve the incident?</h2></div><span className="status-badge status-active"><i /> INCIDENT ACTIVE</span></div><div className="confirmation-evidence"><p>{pendingSolution.recommendation}</p><div><span>503 rate<strong>{pendingSolution.before.errorRate}% → {pendingSolution.expectedAfter.errorRate}%</strong></span><span>Redis latency<strong>{pendingSolution.before.redisLatency}ms → {pendingSolution.expectedAfter.redisLatency}ms</strong></span></div><small>Simulated test evidence · confirm the observed outcome explicitly. The incident is not resolved yet.</small></div><div className="feedback-actions"><button className="feedback-button feedback-success" onClick={() => confirmSolution("SUCCESS")} disabled={busyNow}>{busy === "feedback" && feedbackChoice === "SUCCESS" ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}YES — ISSUE RESOLVED</button><button className="feedback-button feedback-failed" onClick={() => confirmSolution("FAILED")} disabled={busyNow}>{busy === "feedback" && feedbackChoice === "FAILED" ? <LoaderCircle className="spin" size={15} /> : <X size={15} />}NO — ISSUE PERSISTS</button><button className="feedback-button feedback-partial" onClick={() => confirmSolution("PARTIAL")} disabled={busyNow}>{busy === "feedback" && feedbackChoice === "PARTIAL" ? <LoaderCircle className="spin" size={15} /> : <Activity size={15} />}PARTIALLY RESOLVED</button></div></section>}
 
 			{resolution && <section className={`panel learning-panel ${learned ? "learning-complete" : ""}`} id="learning"><div className="panel-title"><span className="panel-icon icon-learning"><ShieldCheck size={17} /></span><div><p className="eyebrow">05 / {learned ? "MEMORY UPDATED" : "RESOLUTION & LEARNING"}</p><h2>{learned ? "Experience retained" : "Incident resolved · ready to learn"}</h2></div>{learned && <span className="retained-badge"><Check size={13} /> SAVED TO HINDSIGHT</span>}</div><div className="resolution-layout"><div className="resolution-summary"><p className="resolution-outcome">Error rate <strong>{resolution.before.errorRate}%</strong><ArrowRight size={15} /><strong>{resolution.after.errorRate}%</strong></p><p>Simulated fix: increase Redis connection pool <strong>50 → 100</strong>. The recovery figures are deterministic demo output.</p><div className="resolution-metrics"><span>Redis latency <strong>{resolution.before.redisLatency}ms → {resolution.after.redisLatency}ms</strong></span><span>Pool utilization <strong>{resolution.before.redisConnectionPoolUsage}% → {resolution.after.redisConnectionPoolUsage}%</strong></span></div></div><div className="learning-checklist"><small>EXPERIENCE TO RETAIN</small>{["Symptoms and service", "Metrics and investigation evidence", "Confirmed cause after simulated resolution", "Fix and measured outcome", "Reusable lesson learned"].map((item) => <span key={item}><Check size={13} /> {item}</span>)}</div></div>{!learned ? <div className="learning-actions"><p>Resolution and memory are separate. Save only after reviewing what will be remembered.</p><button className="button button-learn" onClick={learnFromIncident} disabled={busyNow}>{busy === "learn" ? <LoaderCircle className="spin" size={15} /> : <Database size={15} />} {busy === "learn" ? "Saving experience…" : "Save experience to Hindsight"}<ChevronRight size={14} /></button></div> : <div className="learned-footer"><Check size={15} /><span>This incident’s evidence and outcome can now be recalled during later investigations.</span>{incident?.status === "RESOLVED" && <button className="button button-primary" onClick={createFollowUp} disabled={busyNow}><ArrowRight size={14} /> Create follow-up incident</button>}</div>}</section>}
 
@@ -351,7 +391,8 @@ function MetricTile({ label, value, descriptor, tone, icon, onClick }: { label: 
 
 function MemoryCard({ memory, onOpen }: { memory: IncidentMemory; onOpen: () => void }) {
 	const matched = matchingSignals(memory.text);
-	return <article className="memory-card"><div className="memory-card-meta"><span>{memory.type.toUpperCase()} FACT</span><small>{memory.context ?? "HINDSIGHT RECALL"}</small></div><p>{memory.text}</p>{matched.length > 0 && <div className="shared-signals"><small>SHARED TERMS</small><span>{matched.join(" · ")}</span></div>}<button className="text-action" onClick={onOpen}>View memory details <ChevronRight size={13} /></button></article>;
+	const verification = memory.metadata?.verificationStatus?.toUpperCase();
+	return <article className={`memory-card ${verification ? `memory-${verification.toLowerCase()}` : ""}`}><div className="memory-card-meta"><span>{memory.type.toUpperCase()} FACT {verification && <b className="verification-tag">{verification}</b>}</span><small>{memory.context ?? "HINDSIGHT RECALL"}</small></div><p>{memory.text}</p>{matched.length > 0 && <div className="shared-signals"><small>SHARED TERMS</small><span>{matched.join(" · ")}</span></div>}<button className="text-action" onClick={onOpen}>View memory details <ChevronRight size={13} /></button></article>;
 }
 
 function TimelineRow({ event, expanded, onToggle }: { event: TimelineItem; expanded: boolean; onToggle: () => void }) {
@@ -406,7 +447,8 @@ function errorMessage(error: unknown): string {
 function retryLabel(action: BusyAction): string {
 	if (action === "learn") return "Retry save to Hindsight";
 	if (action === "seed") return "Retry seed memory";
-	if (action === "resolve") return "Retry simulated fix";
+	if (action === "apply") return "Retry simulated fix";
+	if (action === "feedback") return "Retry outcome confirmation";
 	if (action === "investigate") return "Retry investigation";
 	if (action === "new") return "Retry new incident";
 	if (action === "reset") return "Retry demo reset";
