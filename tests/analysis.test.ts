@@ -25,6 +25,7 @@ test("analysis receives current tool evidence and Hindsight memories as distinct
 		metrics: getMetrics("payment-api"),
 		logs: getRecentLogs("payment-api"),
 		memories: [{ id: "memory-1", text: historicalIncident.lesson, type: "experience", context: "resolved incident" }],
+		memoryMode: "enabled",
 	});
 
 	assert.match(prompts, /redisConnectionPoolUsage/);
@@ -39,7 +40,29 @@ test("analysis receives current tool evidence and Hindsight memories as distinct
 test("analysis rejects malformed model output", async () => {
 	const service = new AnalysisService({ complete: async () => "not-json" });
 	await assert.rejects(
-		service.analyze({ incident: demoIncident, metrics: getMetrics("payment-api"), logs: getRecentLogs("payment-api"), memories: [] }),
+		service.analyze({ incident: demoIncident, metrics: getMetrics("payment-api"), logs: getRecentLogs("payment-api"), memories: [], memoryMode: "enabled" }),
 		/The LLM returned invalid JSON/,
 	);
+});
+
+test("baseline analysis explicitly tells the model that Hindsight was skipped", async () => {
+	let prompts = "";
+	const service = new AnalysisService({
+		complete: async (systemPrompt, userPrompt) => {
+			prompts = `${systemPrompt}\n${userPrompt}`;
+			return JSON.stringify({
+				possibleRootCause: "Redis connection issue",
+				reasoning: "Current metrics show saturation.",
+				recommendedNextAction: "Inspect Redis pool usage.",
+				confidence: "medium",
+				uncertainty: "Historical experience was not consulted.",
+			});
+		},
+	});
+
+	await service.analyze({ incident: demoIncident, metrics: getMetrics("payment-api"), logs: getRecentLogs("payment-api"), memories: [], memoryMode: "disabled" });
+
+	assert.match(prompts, /no-memory baseline/);
+	assert.match(prompts, /Hindsight recall was intentionally skipped/);
+	assert.match(prompts, /"memoryMode":"disabled"/);
 });

@@ -20,7 +20,11 @@ export const api = {
 	getSystemStatus: () => request<SystemStatus>("/api/status"),
 	getIncident: () => request<Incident>("/api/incidents/active"),
 	seedMemory: () => request<{ retained: boolean; incidentId: string }>("/api/memory/seed", { method: "POST" }),
-	investigate: (id: string) => request<Investigation>(`/api/incidents/${id}/investigate`, { method: "POST" }),
+	investigate: (id: string, options?: { memoryMode?: "enabled" | "disabled" }) => request<Investigation>(`/api/incidents/${id}/investigate`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(options ?? {}),
+	}),
 	resolve: (id: string) => request<Resolution>(`/api/incidents/${id}/resolve`, { method: "POST" }),
 	learn: (id: string) => request<LearnResult>(`/api/incidents/${id}/learn`, { method: "POST" }),
 	newIncident: () => request<Incident>("/api/incidents/new", { method: "POST" }),

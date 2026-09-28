@@ -40,16 +40,20 @@ test("incident and metrics endpoints return the investigation input", async () =
 
 test("incident learning workflow recalls memory before and after resolution", async () => {
 	const retained: string[] = [];
-	const analysisInputs: Array<{ memories: Array<{ text: string }>; metrics: { redisConnectionPoolUsage: number }; logs: Array<{ message: string }> }> = [];
+	const analysisInputs: Array<{ memories: Array<{ text: string }>; metrics: { redisConnectionPoolUsage: number }; logs: Array<{ message: string }>; memoryMode: "enabled" | "disabled" }> = [];
+	let recallCalls = 0;
 	const server = createApp({
 		memoryService: {
 			retainIncident: async (experience) => { retained.push(experience.incident.id); },
-			recallIncidents: async () => retained.map((id) => ({
-				id,
-				text: id === "HIST-001" ? "Redis connection pool exhaustion caused Payment API 503 errors" : "Resolved recurring Payment API incident by increasing the Redis pool",
-				type: "experience",
-				context: "resolved production incident experience",
-			})),
+			recallIncidents: async () => {
+				recallCalls += 1;
+				return retained.map((id) => ({
+					id,
+					text: id === "HIST-001" ? "Redis connection pool exhaustion caused Payment API 503 errors" : "Resolved recurring Payment API incident by increasing the Redis pool",
+					type: "experience",
+					context: "resolved production incident experience",
+				}));
+			},
 			resetDemoMemories: async () => { retained.length = 0; },
 		},
 		analysisService: {
@@ -72,6 +76,18 @@ test("incident learning workflow recalls memory before and after resolution", as
 
 	try {
 		const investigate = (id: string) => fetch(`${baseUrl}/api/incidents/${id}/investigate`, { method: "POST" });
+		const baselineResponse = await fetch(`${baseUrl}/api/incidents/INC-001/investigate`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ memoryMode: "disabled" }),
+		});
+		const baseline = await baselineResponse.json();
+		assert.equal(baseline.memoryMode, "disabled");
+		assert.deepEqual(baseline.memories, []);
+		assert.equal(recallCalls, 0);
+		assert.equal(baseline.trace.find((event: { id: string }) => event.id === "recall").status, "skipped");
+		assert.equal(analysisInputs[0].memoryMode, "disabled");
+
 		const first = await (await investigate("INC-001")).json();
 		assert.deepEqual(first.memories, []);
 		assert.equal(first.metrics.redisConnectionPoolUsage, 100);
@@ -80,10 +96,12 @@ test("incident learning workflow recalls memory before and after resolution", as
 		const afterSeed = await (await investigate("INC-001")).json();
 		assert.equal(afterSeed.memories.length, 1);
 		assert.match(afterSeed.memories[0].text, /Redis connection pool exhaustion/);
-		assert.equal(analysisInputs[1].metrics.redisConnectionPoolUsage, 100);
+		assert.equal(analysisInputs[2].metrics.redisConnectionPoolUsage, 100);
 		assert.equal(afterSeed.logs.length, 4);
 		assert.match(afterSeed.logs[0].message, /Failed to acquire Redis connection/);
-		assert.equal(analysisInputs[1].logs.length, 4);
+		assert.equal(analysisInputs[2].logs.length, 4);
+		assert.equal(analysisInputs[2].memoryMode, "enabled");
+		assert.equal(recallCalls, 2);
 		assert.deepEqual(afterSeed.trace.map((event: { id: string }) => event.id), ["metrics", "recall", "logs", "analysis"]);
 		assert.equal(afterSeed.trace.every((event: { status: string; durationMs: number }) => event.status === "completed" && event.durationMs >= 0), true);
 

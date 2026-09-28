@@ -33,7 +33,7 @@ export interface TraceEvent {
 	id: string;
 	label: string;
 	detail: string;
-	status: "completed" | "failed";
+	status: "completed" | "failed" | "skipped";
 	durationMs: number;
 	occurredAt: string;
 }
@@ -58,6 +58,7 @@ export interface Investigation {
 	metrics: Metrics;
 	logs: ServiceLog[];
 	memories: IncidentMemory[];
+	memoryMode: "enabled" | "disabled";
 	analysis: Analysis;
 	status: "HYPOTHESIS";
 	trace: TraceEvent[];

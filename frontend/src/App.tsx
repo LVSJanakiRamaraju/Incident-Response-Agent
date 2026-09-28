@@ -26,7 +26,7 @@ import {
 import { ApiError, api } from "./api";
 import type { ApiFailure, Incident, IncidentMemory, Investigation, Resolution, SystemStatus, TraceEvent } from "./types";
 
-type BusyAction = "investigate" | "seed" | "resolve" | "learn" | "new" | "reset";
+type BusyAction = "investigate" | "seed" | "resolve" | "learn" | "new" | "reset" | "demo";
 type TimelineItem = TraceEvent | { id: string; label: string; detail: string; status: "pending"; durationMs: 0; occurredAt: string };
 type DrawerState =
 	| { kind: "memory"; memory: IncidentMemory }
@@ -35,6 +35,7 @@ type DrawerState =
 export function App() {
 	const [incident, setIncident] = useState<Incident>();
 	const [investigation, setInvestigation] = useState<Investigation>();
+	const [baselineInvestigation, setBaselineInvestigation] = useState<Investigation>();
 	const [resolution, setResolution] = useState<Resolution>();
 	const [learned, setLearned] = useState(false);
 	const [trace, setTrace] = useState<TimelineItem[]>([]);
@@ -111,6 +112,7 @@ export function App() {
 
 	function investigate() {
 		if (!incident) return;
+		setBaselineInvestigation(undefined);
 		setTrace([{ id: "request", label: "Investigation request in progress", detail: "Waiting for measured backend activity events.", status: "pending", durationMs: 0, occurredAt: new Date().toISOString() }]);
 		void perform("investigate", "Agent is querying metrics, Hindsight, and the analysis model…", () => api.investigate(incident.id), (result) => {
 			setIncident(result.incident);
@@ -120,6 +122,54 @@ export function App() {
 			setTrace(result.trace);
 			setNotice(result.memories.length ? `Hindsight returned ${result.memories.length} memories for this investigation.` : "Hindsight returned no relevant experience; analysis uses current evidence only.");
 		});
+	}
+
+	async function runMemoryDemo() {
+		if (!incident || busyNow) return;
+		const runIncident = incident;
+		setBusy("demo");
+		setBusyMessage("Running a no-memory baseline investigation…");
+		setFailure(undefined);
+		setRetryAction(undefined);
+		setNotice(undefined);
+		setBaselineInvestigation(undefined);
+		setInvestigation(undefined);
+		setResolution(undefined);
+		setLearned(false);
+		setTrace([{ id: "baseline", label: "No-memory baseline started", detail: "Hindsight recall is explicitly disabled for this run.", status: "pending", durationMs: 0, occurredAt: new Date().toISOString() }]);
+		try {
+			const baseline = await api.investigate(runIncident.id, { memoryMode: "disabled" });
+			setBaselineInvestigation(baseline);
+			setInvestigation(baseline);
+			setTrace(baseline.trace);
+
+			setBusyMessage("Retaining the historical Payment API experience in Hindsight…");
+			setBusy("seed");
+			const seedStartedAt = Date.now();
+			const retained = await api.seedMemory();
+			const seedEvent = localEvent("seed", "Historical experience retained", `Hindsight document ${retained.incidentId}`, Date.now() - seedStartedAt);
+			setTrace((current) => [...current, seedEvent]);
+
+			setBusyMessage("Re-running the same incident with Hindsight memory enabled…");
+			setBusy("demo");
+			const memoryEnabled = await api.investigate(runIncident.id);
+			setInvestigation(memoryEnabled);
+			setTrace([...baseline.trace, seedEvent, ...memoryEnabled.trace]);
+			setNotice(`Comparison complete: baseline used no Hindsight memory; the second run received ${memoryEnabled.memories.length} historical memories.`);
+			void refreshStatus();
+		} catch (error) {
+			setRetryAction("demo");
+			if (error instanceof ApiError) {
+				setFailure(error.failure);
+				if (error.failure.trace) setTrace((current) => [...current.filter((event) => event.id !== "request"), ...error.failure.trace!]);
+			} else {
+				setFailure({ error: errorMessage(error) });
+			}
+			void refreshStatus();
+		} finally {
+			setBusy(undefined);
+			setBusyMessage("");
+		}
 	}
 
 	function resolveIncident() {
@@ -146,6 +196,7 @@ export function App() {
 		void perform("new", "Creating the next recurring incident…", api.newIncident, (nextIncident) => {
 			setIncident(nextIncident);
 			setInvestigation(undefined);
+			setBaselineInvestigation(undefined);
 			setResolution(undefined);
 			setLearned(false);
 			setTrace([localEvent("intake", "Follow-up incident created", nextIncident.id, 0)]);
@@ -158,6 +209,7 @@ export function App() {
 		void perform("reset", "Removing only this prototype's demo documents from Hindsight…", api.resetDemo, ({ incident: initialIncident }) => {
 			setIncident(initialIncident);
 			setInvestigation(undefined);
+			setBaselineInvestigation(undefined);
 			setResolution(undefined);
 			setLearned(false);
 			setTrace([localEvent("reset", "Demo reset", "BugSlayers demo documents cleared", 0)]);
@@ -185,6 +237,7 @@ export function App() {
 		if (retryAction === "learn") learnFromIncident();
 		if (retryAction === "new") createFollowUp();
 		if (retryAction === "reset") resetDemo();
+		if (retryAction === "demo") runMemoryDemo();
 	}
 
 	return (
@@ -206,7 +259,7 @@ export function App() {
 			{demoGuide && <section className="demo-guide" aria-label="Demo walkthrough"><div><p className="eyebrow">MEMORY LOOP / PRESENTER PATH</p><strong>Show the before and after of organizational memory.</strong><p>Investigate → seed prior experience → investigate again → apply simulated fix → save experience → open the next incident.</p></div><button className="icon-button" onClick={() => setDemoGuide(false)} aria-label="Close demo guide"><X size={16} /></button></section>}
 
 			<section className="incident-hero" id="incident">
-				<div className="incident-hero-main"><p className="eyebrow">INCIDENT / {incident?.id ?? "LOADING"}<span className="eyebrow-rule" /></p><h1>Payment API</h1><p className="incident-description">{incident?.description ?? "Loading current incident state…"}</p><div className="incident-actions"><button className="button button-primary" onClick={investigate} disabled={!active || busyNow || !incident}>{busy === "investigate" ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}{busy === "investigate" ? "Agent investigating" : investigation ? "Investigate again" : "Investigate incident"}<ChevronRight size={15} /></button><a className="button button-outline" href="#evidence">View evidence</a><a className="button button-outline" href="#memory">View memory</a></div></div>
+				<div className="incident-hero-main"><p className="eyebrow">INCIDENT / {incident?.id ?? "LOADING"}<span className="eyebrow-rule" /></p><h1>Payment API</h1><p className="incident-description">{incident?.description ?? "Loading current incident state…"}</p><div className="incident-actions"><button className="button button-primary" onClick={investigate} disabled={!active || busyNow || !incident}>{busy === "investigate" ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}{busy === "investigate" ? "Agent investigating" : investigation ? "Investigate incident" : "Investigate incident"}<ChevronRight size={15} /></button><button className="button button-memory-run" onClick={runMemoryDemo} disabled={!active || busyNow || !incident}>{busy === "demo" ? <LoaderCircle className="spin" size={15} /> : <Layers3 size={15} />}{busy === "demo" ? busyMessage : "Run memory demo"}</button><a className="button button-outline" href="#evidence">View evidence</a><a className="button button-outline" href="#memory">View memory</a></div></div>
 				<div className="incident-hero-status"><span className="severity-badge"><AlertTriangle size={14} /> SEV-1 / HIGH</span><span className={`status-badge ${active ? "status-active" : "status-resolved"}`}><i /> {incident?.status ?? "LOADING"}</span><span className="incident-state-caption">{busy === "investigate" ? "AGENT IS INVESTIGATING" : resolution ? "RECOVERY VERIFIED · DEMO" : active ? "AWAITING INVESTIGATION" : "INCIDENT CLOSED"}</span></div>
 				<div className="incident-facts"><Fact label="SERVICE" value={incident?.service ?? "—"} icon={<Server size={13} />} /><Fact label="TRIGGER" value="HTTP 503 / REDIS" /><Fact label="STARTED" value="Demo scenario" /><Fact label="STATE" value={busy === "investigate" ? "INVESTIGATION RUNNING" : incident?.status ?? "—"} /></div>
 			</section>
@@ -249,6 +302,8 @@ export function App() {
 					<div className="memory-actions"><div><span className="label-dot dot-history" /> Recalled facts are shown as historical evidence, not current proof.</div><button className="button button-memory" onClick={seedMemory} disabled={busyNow}>{busy === "seed" ? <LoaderCircle className="spin" size={14} /> : <Database size={14} />} Seed previous incident</button></div>
 				</section>
 			</div>
+
+			{baselineInvestigation && investigation?.memoryMode === "enabled" && <section className="panel memory-comparison" aria-labelledby="comparison-title"><div className="panel-title"><span className="panel-icon icon-analysis"><Layers3 size={17} /></span><div><p className="eyebrow">BEFORE / AFTER HINDSIGHT</p><h2 id="comparison-title">What changed when the agent used memory?</h2></div><span className="comparison-run-tag">SAME INCIDENT · TWO ACTUAL RUNS</span></div><div className="comparison-grid"><article className="comparison-side no-memory"><p><CircleDot size={13} /> BASELINE · HINDSIGHT SKIPPED</p><h3>{baselineInvestigation.analysis.possibleRootCause}</h3><span>Memories passed to model: {baselineInvestigation.memories.length}</span><p>{baselineInvestigation.analysis.reasoning}</p></article><div className="comparison-arrow"><ArrowRight size={17} /></div><article className="comparison-side with-memory"><p><Database size={13} /> HINDSIGHT ENABLED · {investigation.memories.length} MEMORIES RETURNED</p><h3>{investigation.analysis.possibleRootCause}</h3><span>Historical evidence was supplied separately from current metrics and logs.</span><p>{investigation.analysis.reasoning}</p>{investigation.memories[0] && <blockquote>{investigation.memories[0].text}</blockquote>}</article></div><small className="comparison-footnote">These are two real model responses. The display reports observed outputs only; it does not claim an accuracy or MTTR improvement.</small></section>}
 
 			<div className="agent-grid">
 				<section className="panel agent-activity" id="activity">
@@ -300,7 +355,8 @@ function MemoryCard({ memory, onOpen }: { memory: IncidentMemory; onOpen: () => 
 
 function TimelineRow({ event, expanded, onToggle }: { event: TimelineItem; expanded: boolean; onToggle: () => void }) {
 	const pending = event.status === "pending";
-	return <article className={`timeline-row ${pending ? "timeline-pending" : event.status === "failed" ? "timeline-failed" : ""}`}><button className="timeline-toggle" onClick={onToggle} aria-expanded={expanded}><span className="event-marker">{pending ? <LoaderCircle className="spin" size={13} /> : event.status === "failed" ? <X size={12} /> : <Check size={12} />}</span><span className="timeline-event-copy"><strong>{event.label}</strong><small>{event.detail}</small></span><span className="timeline-meta">{pending ? "RUNNING" : `${event.durationMs}ms`}<ChevronDown size={13} className={expanded ? "chevron-open" : ""} /></span></button>{expanded && <div className="timeline-detail"><span>RECORDED {formatDateTime(event.occurredAt)}</span><span>RESULT {pending ? "IN PROGRESS" : event.status.toUpperCase()}</span><p>{event.detail}</p></div>}</article>;
+	const skipped = event.status === "skipped";
+	return <article className={`timeline-row ${pending ? "timeline-pending" : event.status === "failed" ? "timeline-failed" : skipped ? "timeline-skipped" : ""}`}><button className="timeline-toggle" onClick={onToggle} aria-expanded={expanded}><span className="event-marker">{pending ? <LoaderCircle className="spin" size={13} /> : event.status === "failed" ? <X size={12} /> : skipped ? <CircleDot size={12} /> : <Check size={12} />}</span><span className="timeline-event-copy"><strong>{event.label}</strong><small>{event.detail}</small></span><span className="timeline-meta">{pending ? "RUNNING" : skipped ? "SKIPPED" : `${event.durationMs}ms`}<ChevronDown size={13} className={expanded ? "chevron-open" : ""} /></span></button>{expanded && <div className="timeline-detail"><span>RECORDED {formatDateTime(event.occurredAt)}</span><span>RESULT {pending ? "IN PROGRESS" : event.status.toUpperCase()}</span><p>{event.detail}</p></div>}</article>;
 }
 
 function DependencyRow({ name, detail, value, icon }: { name: string; detail: string; value?: "connected" | "disconnected"; icon: React.ReactNode }) {

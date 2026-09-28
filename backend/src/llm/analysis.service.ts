@@ -9,6 +9,7 @@ export interface AnalysisInput {
 	metrics: ServiceMetrics;
 	logs: ServiceLogEntry[];
 	memories: IncidentMemory[];
+	memoryMode: "enabled" | "disabled";
 }
 
 export interface IncidentAnalysis {
@@ -30,13 +31,17 @@ export class AnalysisService {
 		const systemPrompt = [
 			"You are an incident-response analyst. Produce a cautious, evidence-grounded hypothesis, never a confirmed root cause.",
 			"Current metrics and log entries are current tool evidence. Recalled incident memories are historical evidence and must be labeled as such.",
-			"Do not invent logs, metrics, tool results, incidents, or resolutions. If the historical memory list is empty, say there is no relevant historical context.",
+			input.memoryMode === "disabled"
+				? "This is a no-memory baseline: Hindsight recall was intentionally skipped. Do not imply that historical experience was checked."
+				: "If the historical memory list is empty, say no relevant experience was returned by Hindsight.",
+			"Do not invent logs, metrics, tool results, incidents, or resolutions.",
 			"Return only a JSON object with string fields possibleRootCause, reasoning, recommendedNextAction, uncertainty, and confidence set to low, medium, or high.",
 		].join(" ");
 		const userPrompt = JSON.stringify({
 			currentIncident: input.incident,
 			currentToolEvidence: input.metrics,
 			currentLogEvidence: input.logs,
+			memoryMode: input.memoryMode,
 			historicalHindsightMemories: input.memories.map(({ text, type, context }) => ({ text, type, context })),
 		});
 		const raw = await this.model.complete(systemPrompt, userPrompt);

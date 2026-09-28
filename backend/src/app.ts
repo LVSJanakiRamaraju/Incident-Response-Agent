@@ -74,7 +74,8 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 			return;
 		}
 
-		const trace: Array<{ id: string; label: string; detail: string; status: "completed" | "failed"; durationMs: number; occurredAt: string }> = [];
+		const trace: Array<{ id: string; label: string; detail: string; status: "completed" | "failed" | "skipped"; durationMs: number; occurredAt: string }> = [];
+		const memoryMode = request.body?.memoryMode === "disabled" ? "disabled" : "enabled";
 		const metricStarted = Date.now();
 		let metrics: ServiceMetrics;
 		try {
@@ -86,17 +87,21 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 			return;
 		}
 
-		memoryService ??= createMemoryServiceFromEnv();
-		const recallStarted = Date.now();
-		let memories;
-		try {
-			memories = await memoryService.recallIncidents(currentIncident, metrics);
-		} catch {
-			trace.push({ id: "recall", label: "Hindsight memory search failed", detail: "The current incident could not be compared with stored experience.", status: "failed", durationMs: Date.now() - recallStarted, occurredAt: new Date().toISOString() });
-			response.status(503).json({ code: "HINDSIGHT_UNAVAILABLE", dependency: "hindsight", error: "Hindsight could not return incident memories. Check its API URL and credentials.", trace });
-			return;
+		let memories: Awaited<ReturnType<MemoryServicePort["recallIncidents"]>> = [];
+		if (memoryMode === "disabled") {
+			trace.push({ id: "recall", label: "Hindsight bypassed for baseline", detail: "Memory recall is explicitly disabled for this comparison run.", status: "skipped", durationMs: 0, occurredAt: new Date().toISOString() });
+		} else {
+			memoryService ??= createMemoryServiceFromEnv();
+			const recallStarted = Date.now();
+			try {
+				memories = await memoryService.recallIncidents(currentIncident, metrics);
+			} catch {
+				trace.push({ id: "recall", label: "Hindsight memory search failed", detail: "The current incident could not be compared with stored experience.", status: "failed", durationMs: Date.now() - recallStarted, occurredAt: new Date().toISOString() });
+				response.status(503).json({ code: "HINDSIGHT_UNAVAILABLE", dependency: "hindsight", error: "Hindsight could not return incident memories. Check its API URL and credentials.", trace });
+				return;
+			}
+			trace.push({ id: "recall", label: memories.length ? "Hindsight memories recalled" : "Hindsight search completed", detail: `${memories.length} memories returned`, status: "completed", durationMs: Date.now() - recallStarted, occurredAt: new Date().toISOString() });
 		}
-		trace.push({ id: "recall", label: memories.length ? "Hindsight memories recalled" : "Hindsight search completed", detail: `${memories.length} memories returned`, status: "completed", durationMs: Date.now() - recallStarted, occurredAt: new Date().toISOString() });
 
 		const logsStarted = Date.now();
 		let logs: ServiceLogEntry[];
@@ -113,7 +118,7 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 		const analysisStarted = Date.now();
 		let analysis: IncidentAnalysis;
 		try {
-			analysis = await analysisService.analyze({ incident: currentIncident, metrics, logs, memories });
+			analysis = await analysisService.analyze({ incident: currentIncident, metrics, logs, memories, memoryMode });
 		} catch (error) {
 			const unavailableModel = (error as { status?: number }).status === 404;
 			trace.push({ id: "analysis", label: "Groq analysis failed", detail: unavailableModel ? "The configured model was not found or is not available to this account." : "The model provider did not complete the analysis request.", status: "failed", durationMs: Date.now() - analysisStarted, occurredAt: new Date().toISOString() });
@@ -122,7 +127,7 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 		}
 		trace.push({ id: "analysis", label: "Agent analysis generated", detail: "Current evidence and recalled memories were supplied to the model.", status: "completed", durationMs: Date.now() - analysisStarted, occurredAt: new Date().toISOString() });
 		lastInvestigation = { incidentId: currentIncident.id, metrics, analysis };
-		response.json({ incident: currentIncident, metrics, logs, memories, analysis, status: "HYPOTHESIS", trace });
+		response.json({ incident: currentIncident, metrics, logs, memories, analysis, memoryMode, status: "HYPOTHESIS", trace });
 	});
 
 	app.post("/api/incidents/:id/resolve", async (request, response) => {
