@@ -74,7 +74,7 @@ The API listens on port `3001`. Vite proxies `/api` requests to it. Never commit
 
 ## Demo Workflow
 
-See [docs/demo.md](docs/demo.md) for the presenter walkthrough. In short: reset the demo, investigate once without memory, seed the historical incident into Hindsight, investigate again, resolve and retain the outcome, then create a follow-up incident and recall the accumulated experience.
+See [docs/demo.md](docs/demo.md) for the presenter walkthrough. **Run memory demo** performs a real no-recall baseline, retains the historical incident in Hindsight, and repeats the investigation with recall enabled. Then apply the simulated resolution, explicitly save the outcome, and open a follow-up incident to recall the accumulated experience.
 
 ## API
 
@@ -90,6 +90,8 @@ See [docs/demo.md](docs/demo.md) for the presenter walkthrough. In short: reset 
 - `POST /api/demo/reset`
 
 Resolution applies the simulated recovery; saving experience to Hindsight is a separate `learn` operation. Application incident state is in memory and resets when the API process restarts. Hindsight stores persistent incident experience.
+
+The investigation endpoint accepts `{ "memoryMode": "disabled" }` for an explicit baseline comparison. Normal investigation requests enable Hindsight recall.
 
 ## Validation
 

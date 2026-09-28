@@ -9,12 +9,11 @@
 
 ## Walkthrough
 
-1. Select **Investigate incident** before seeding. The API retrieves deterministic Payment API metrics, recalls Hindsight, calls the recent-logs tool, then asks the model to analyze current evidence with any returned history. Show the empty-memory state and the resulting current-evidence-only analysis.
-2. Select **Seed historical incident**. This calls Hindsight retain with the prior 503/Redis incident, root cause, pool change, outcome, and lesson.
-3. Select **Investigate again**. Show the recalled experience and how it appears separately from the current metrics and model hypothesis.
-4. Select **Apply simulated fix**. The prototype simulates the Redis pool change from 50 to 100 and shows error rate recovering from 18.2% to 0.3%.
-5. Review the learning panel and select **Save experience to Hindsight**. This separately retains incident evidence and outcome.
-6. Select **Create follow-up incident**, then investigate `INC-002`. Hindsight can now return both the seeded event and the newly retained resolution.
+1. Select **Run memory demo**. First, the API runs an investigation with `memoryMode: disabled`, explicitly skips Hindsight, calls metrics and logs, and generates a baseline analysis.
+2. The same action retains the historical 503/Redis incident in Hindsight, then reruns with recall enabled. Compare the two real model outputs and the facts Hindsight returned.
+3. Select **Apply simulated fix**. The prototype simulates the Redis pool change from 50 to 100 and shows error rate recovering from 18.2% to 0.3%.
+4. Review the learning panel and select **Save experience to Hindsight**. This separately retains incident evidence and outcome.
+5. Select **Create follow-up incident**, then investigate `INC-002`. Hindsight can now return both the seeded event and the newly retained resolution.
 
 The investigation trace records metrics retrieval, Hindsight recall, recent-log retrieval, and analysis. The tool panel shows the returned log entries as demo data. A model conclusion remains labeled as a hypothesis; the simulated engineer resolution is the point where this prototype records the cause and outcome as confirmed.
 
