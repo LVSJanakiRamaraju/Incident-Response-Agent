@@ -110,10 +110,11 @@ See [docs/demo.md](docs/demo.md) for the presenter walkthrough. In short: reset 
 - `POST /api/memory/seed`
 - `POST /api/incidents/:id/investigate`
 - `POST /api/incidents/:id/resolve`
+- `POST /api/incidents/:id/learn`
 - `POST /api/incidents/new`
 - `POST /api/demo/reset`
 
-Application incident state is in memory and resets when the API process restarts. Hindsight stores persistent incident experience.
+Resolution applies the simulated recovery; saving experience to Hindsight is a separate `learn` operation. Application incident state is in memory and resets when the API process restarts. Hindsight stores persistent incident experience.
 
 ## Validation
 

@@ -12,8 +12,9 @@
 1. Select **Investigate incident** before seeding. The API retrieves deterministic current Payment API metrics, queries Hindsight, and asks the model to analyze the evidence. Show the empty-memory state and the resulting current-evidence-only analysis.
 2. Select **Seed historical incident**. This calls Hindsight retain with the prior 503/Redis incident, root cause, pool change, outcome, and lesson.
 3. Select **Investigate again**. Show the recalled experience and how it appears separately from the current metrics and model hypothesis.
-4. Select **Resolve & learn**. The prototype simulates the Redis pool change from 50 to 100, shows error rate recovering from 18.2% to 0.3%, and retains the incident evidence and outcome in Hindsight.
-5. Select **New incident**, then investigate `INC-002`. Hindsight can now return both the seeded event and the newly retained resolution.
+4. Select **Apply simulated fix**. The prototype simulates the Redis pool change from 50 to 100 and shows error rate recovering from 18.2% to 0.3%.
+5. Review the learning panel and select **Save experience to Hindsight**. This separately retains incident evidence and outcome.
+6. Select **Create follow-up incident**, then investigate `INC-002`. Hindsight can now return both the seeded event and the newly retained resolution.
 
 The investigation trace records recall, metrics retrieval, analysis, resolution, and retention. A model conclusion remains labeled as a hypothesis; the simulated engineer resolution is the point where this prototype records the cause and outcome as confirmed.
 
