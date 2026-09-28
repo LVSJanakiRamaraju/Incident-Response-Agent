@@ -22,6 +22,8 @@ export interface IncidentMemory {
 interface HindsightPort {
 	createBank: (bankId: string, options?: { name?: string; reflectMission?: string; retainMission?: string }) => Promise<unknown>;
 	retain: (bankId: string, content: string, options?: { context?: string; metadata?: Record<string, string>; documentId?: string }) => Promise<unknown>;
+	listDocuments: (bankId: string, options?: { limit?: number; offset?: number }) => Promise<{ items: Array<{ id: string }>; total: number }>;
+	deleteDocument: (bankId: string, documentId: string) => Promise<void>;
 	recall: (bankId: string, query: string, options?: { budget?: "low" | "mid" | "high"; maxTokens?: number }) => Promise<{
 		results: Array<{ id: string; text: string; type?: string | null; context?: string | null }>;
 	}>;
@@ -77,12 +79,19 @@ export class MemoryService {
 
 		await this.client.retain(this.bankId, content, {
 			context: "resolved production incident experience",
-			documentId: `incident-${experience.incident.id}`,
+			documentId: `bugslayers-demo-${experience.incident.id}`,
 			metadata: {
 				incidentId: experience.incident.id,
 				service: experience.incident.service,
 			},
 		});
+	}
+
+	async resetDemoMemories(): Promise<void> {
+		await this.ensureBank();
+		const documents = await this.client.listDocuments(this.bankId, { limit: 100 });
+		const demoDocuments = documents.items.filter(({ id }) => id.startsWith("bugslayers-demo-"));
+		await Promise.all(demoDocuments.map(({ id }) => this.client.deleteDocument(this.bankId, id)));
 	}
 
 	async recallIncidents(incident: Incident, metrics: ServiceMetrics): Promise<IncidentMemory[]> {
