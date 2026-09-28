@@ -1,6 +1,7 @@
 import express from "express";
 import { demoIncident } from "./incidents/incident.js";
 import { historicalIncident, MemoryService, createMemoryServiceFromEnv } from "./memory/memory.service.js";
+import { AnalysisService, createAnalysisServiceFromEnv } from "./llm/analysis.service.js";
 import { getMetrics, type ServiceMetrics } from "./tools/metrics.js";
 
 interface MemoryServicePort {
@@ -10,6 +11,7 @@ interface MemoryServicePort {
 
 export function createApp(dependencies: { memoryService?: MemoryServicePort } = {}) {
 	let memoryService = dependencies.memoryService;
+	let analysisService: AnalysisService | undefined;
 	const app = express();
 	app.use(express.json());
 
@@ -53,10 +55,18 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort } = 
 			const metrics = getMetrics(demoIncident.service);
 			memoryService ??= createMemoryServiceFromEnv();
 			const memories = await memoryService.recallIncidents(demoIncident, metrics);
-			response.json({ incident: demoIncident, metrics, memories });
+			analysisService ??= createAnalysisServiceFromEnv();
+			const analysis = await analysisService.analyze({ incident: demoIncident, metrics, memories });
+			response.json({
+				incident: demoIncident,
+				metrics,
+				memories,
+				analysis,
+				status: "HYPOTHESIS",
+			});
 		} catch {
 			response.status(503).json({
-				error: "Could not recall incident experience from Hindsight. Check the Hindsight URL, service, and API key.",
+				error: "Investigation could not complete. Check the Hindsight service, API key, and Groq model configuration.",
 			});
 		}
 	});
