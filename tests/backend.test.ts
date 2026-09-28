@@ -131,3 +131,29 @@ test("investigation failures identify the failing provider and preserve complete
 		});
 	}
 });
+
+test("historical seed failures identify Hindsight as the failed dependency", async () => {
+	const server = createApp({
+		memoryService: {
+			retainIncident: async () => { throw new Error("offline"); },
+			recallIncidents: async () => [],
+			resetDemoMemories: async () => {},
+		},
+	}).listen(0, "127.0.0.1");
+	await once(server, "listening");
+	const address = server.address();
+	assert.ok(address && typeof address !== "string");
+
+	try {
+		const response = await fetch(`http://127.0.0.1:${address.port}/api/memory/seed`, { method: "POST" });
+		const body = await response.json();
+		assert.equal(response.status, 503);
+		assert.equal(body.code, "HINDSIGHT_RETAIN_FAILED");
+		assert.equal(body.dependency, "hindsight");
+	} finally {
+		server.closeAllConnections();
+		await new Promise<void>((resolve, reject) => {
+			server.close((error) => error ? reject(error) : resolve());
+		});
+	}
+});

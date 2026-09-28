@@ -55,9 +55,7 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 			await memoryService.retainIncident(historicalIncident);
 			response.json({ retained: true, incidentId: historicalIncident.incident.id });
 		} catch {
-			response.status(503).json({
-				error: "Could not store the historical incident in Hindsight. Check the Hindsight URL, service, and API key.",
-			});
+			response.status(503).json({ code: "HINDSIGHT_RETAIN_FAILED", dependency: "hindsight", error: "Could not store the historical incident in Hindsight. Check the Hindsight URL, service, and API key." });
 		}
 	});
 
