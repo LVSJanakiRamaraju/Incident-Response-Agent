@@ -1,6 +1,6 @@
 import express from "express";
 import { demoIncident } from "./incidents/incident.js";
-import { historicalIncident, MemoryService, createMemoryServiceFromEnv } from "./memory/memory.service.js";
+import { historicalIncident, MemoryService, createMemoryServiceFromEnv, type IncidentExperience } from "./memory/memory.service.js";
 import { AnalysisService, createAnalysisServiceFromEnv, type AnalysisInput, type IncidentAnalysis } from "./llm/analysis.service.js";
 import { getMetrics, getResolvedMetrics, type ServiceMetrics } from "./tools/metrics.js";
 import { createStatusChecksFromEnv, getSystemStatus, type StatusChecks } from "./system/status.service.js";
@@ -22,6 +22,8 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 	let currentIncident = { ...demoIncident, symptoms: [...demoIncident.symptoms] };
 	let incidentSequence = 1;
 	let lastInvestigation: { incidentId: string; metrics: ServiceMetrics; analysis: IncidentAnalysis } | undefined;
+	let pendingExperience: IncidentExperience | undefined;
+	let experienceRetained = false;
 	const app = express();
 	app.use(express.json());
 
@@ -117,29 +119,43 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 
 		const resolvedIncident = { ...currentIncident, status: "RESOLVED" as const };
 		const afterMetrics = getResolvedMetrics(currentIncident.service);
+		pendingExperience = {
+			incident: resolvedIncident,
+			rootCause: "Redis connection pool exhaustion, confirmed by the simulated resolution",
+			resolution: "Increase Redis connection pool size from 50 to 100",
+			outcome: `Error rate decreased from ${lastInvestigation.metrics.errorRate}% to ${afterMetrics.errorRate}% after the pool increase`,
+			lesson: "For Payment API 503 incidents with high Redis latency and pool saturation, investigate Redis connection pool exhaustion early.",
+			evidence: lastInvestigation.metrics,
+			investigation: [lastInvestigation.analysis.recommendedNextAction],
+		};
+		currentIncident = resolvedIncident;
+		experienceRetained = false;
+		response.json({ incident: currentIncident, before: lastInvestigation.metrics, after: afterMetrics, retained: false });
+	});
+
+	app.post("/api/incidents/:id/learn", async (request, response) => {
+		if (request.params.id !== currentIncident.id || currentIncident.status !== "RESOLVED" || !pendingExperience) {
+			response.status(409).json({ error: "Resolve the active incident before saving its experience" });
+			return;
+		}
+		if (experienceRetained) {
+			response.json({ retained: true, incidentId: currentIncident.id });
+			return;
+		}
+
 		try {
 			memoryService ??= createMemoryServiceFromEnv();
-			await memoryService.retainIncident({
-				incident: resolvedIncident,
-				rootCause: "Redis connection pool exhaustion, confirmed by the simulated resolution",
-				resolution: "Increase Redis connection pool size from 50 to 100",
-				outcome: `Error rate decreased from ${lastInvestigation.metrics.errorRate}% to ${afterMetrics.errorRate}% after the pool increase`,
-				lesson: "For Payment API 503 incidents with high Redis latency and pool saturation, investigate Redis connection pool exhaustion early.",
-				evidence: lastInvestigation.metrics,
-				investigation: [lastInvestigation.analysis.recommendedNextAction],
-			});
-			currentIncident = resolvedIncident;
-			response.json({ incident: currentIncident, before: lastInvestigation.metrics, after: afterMetrics, retained: true });
+			await memoryService.retainIncident(pendingExperience);
+			experienceRetained = true;
+			response.json({ retained: true, incidentId: currentIncident.id });
 		} catch {
-			response.status(503).json({
-				error: "The simulated resolution is ready, but Hindsight could not retain the outcome. Check the Hindsight service and retry.",
-			});
+			response.status(503).json({ code: "HINDSIGHT_RETAIN_FAILED", dependency: "hindsight", error: "The incident is resolved, but Hindsight could not retain the experience. Retry saving it." });
 		}
 	});
 
 	app.post("/api/incidents/new", (_request, response) => {
-		if (currentIncident.status !== "RESOLVED") {
-			response.status(409).json({ error: "Resolve the active incident before creating another" });
+		if (currentIncident.status !== "RESOLVED" || !experienceRetained) {
+			response.status(409).json({ error: "Resolve the incident and save its experience before creating another" });
 			return;
 		}
 		incidentSequence += 1;
@@ -149,6 +165,8 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 			symptoms: [...demoIncident.symptoms],
 		};
 		lastInvestigation = undefined;
+		pendingExperience = undefined;
+		experienceRetained = false;
 		response.status(201).json(currentIncident);
 	});
 
@@ -159,6 +177,8 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 			currentIncident = { ...demoIncident, symptoms: [...demoIncident.symptoms] };
 			incidentSequence = 1;
 			lastInvestigation = undefined;
+			pendingExperience = undefined;
+			experienceRetained = false;
 			response.json({ reset: true, incident: currentIncident });
 		} catch {
 			response.status(503).json({ error: "Could not reset BugSlayers demo memories in Hindsight" });

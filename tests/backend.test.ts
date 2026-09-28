@@ -81,8 +81,13 @@ test("incident learning workflow recalls memory before and after resolution", as
 
 		const resolutionResponse = await fetch(`${baseUrl}/api/incidents/INC-001/resolve`, { method: "POST" });
 		const resolution = await resolutionResponse.json();
-		assert.equal(resolution.retained, true);
+		assert.equal(resolution.retained, false);
 		assert.equal(resolution.after.errorRate, 0.3);
+		assert.deepEqual(retained, ["HIST-001"]);
+
+		const learnResponse = await fetch(`${baseUrl}/api/incidents/INC-001/learn`, { method: "POST" });
+		assert.equal(learnResponse.status, 200);
+		assert.equal((await learnResponse.json()).retained, true);
 		assert.deepEqual(retained, ["HIST-001", "INC-001"]);
 
 		const nextIncident = await (await fetch(`${baseUrl}/api/incidents/new`, { method: "POST" })).json();
