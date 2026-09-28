@@ -11,9 +11,10 @@
 
 1. Select **Run memory demo**. First, the API runs an investigation with `memoryMode: disabled`, explicitly skips Hindsight, calls metrics and logs, and generates a baseline analysis.
 2. The same action retains the historical 503/Redis incident in Hindsight, then reruns with recall enabled. Compare the two real model outputs and the facts Hindsight returned.
-3. Select **Apply simulated fix**. The prototype simulates the Redis pool change from 50 to 100 and shows error rate recovering from 18.2% to 0.3%.
-4. Review the learning panel and select **Save experience to Hindsight**. This separately retains incident evidence and outcome.
-5. Select **Create follow-up incident**, then investigate `INC-002`. Hindsight can now return both the seeded event and the newly retained resolution.
+3. In the Hindsight panel, inspect the validated Redis-pool runbook. Its steps, prior outcome, and source incident ID come from metadata returned with recalled Hindsight facts; unvalidated notes do not become runbook recommendations.
+4. Select **Apply simulated fix**. The prototype simulates the Redis pool change from 50 to 100 and shows error rate recovering from 18.2% to 0.3%.
+5. Review the learning panel and select **Save experience to Hindsight**. This separately retains incident evidence, outcome, and the validated runbook.
+6. Select **Create follow-up incident**, then investigate `INC-002`. Hindsight can now return both prior experiences and attribute the validated runbook to their source incident IDs.
 
 The investigation trace records metrics retrieval, Hindsight recall, recent-log retrieval, and analysis. The tool panel shows the returned log entries as demo data. A model conclusion remains labeled as a hypothesis; the simulated engineer resolution is the point where this prototype records the cause and outcome as confirmed.
 

@@ -8,11 +8,11 @@ Production incident knowledge is often fragmented across tickets, runbooks, logs
 
 ## Solution
 
-The agent loads a Payment API 503 incident, recalls relevant incident experience from Hindsight, calls simulated metrics and recent-logs tools, and sends the incident, current tool evidence, and historical memories to a Groq-hosted model. It returns a structured hypothesis, rationale, next action, confidence, and uncertainty. Resolving the simulated incident retains its evidence and outcome in Hindsight for the next investigation.
+The agent loads a Payment API 503 incident, recalls relevant incident experience from Hindsight, calls simulated metrics and recent-logs tools, and sends the incident, current tool evidence, and historical memories to a Groq-hosted model. It returns a structured hypothesis, rationale, next action, confidence, and uncertainty. Validated runbook metadata recalled from Hindsight is shown with its prior outcome and source incidents. Resolving the simulated incident retains its evidence, outcome, and validated procedure in Hindsight for future investigations.
 
 ## Why Hindsight?
 
-Hindsight is persistent organizational incident memory, not a chat transcript or local JSON fixture. The agent calls `retain` for the seeded and resolved incident experiences, then `recall` with the current service, symptoms, and tool measurements before reasoning. Hindsight memories are rendered separately from current facts, and the model is instructed not to treat historical experience as proof of the current cause.
+Hindsight is persistent organizational incident memory, not a chat transcript or local JSON fixture. The agent calls `retain` for the seeded and resolved incident experiences, then `recall` with the current service, symptoms, and tool measurements before reasoning. A runbook is recommended only when a recalled fact carries `runbookStatus=validated`; repeated facts are grouped by runbook ID and retain their source incident IDs. Hindsight memories are rendered separately from current facts, and the model is instructed not to treat historical experience as proof of the current cause.
 
 ## How It Works
 
