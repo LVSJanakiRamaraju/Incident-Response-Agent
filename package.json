@@ -7,8 +7,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc --noEmit false --outDir dist",
+    "build": "tsc --noEmit false --outDir dist && tsc -p tsconfig.frontend.json && vite build --config vite.config.ts",
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "tsx watch backend/src/server.ts",
+    "dev:web": "vite --config vite.config.ts",
     "test": "tsx --test tests/project.test.ts tests/backend.test.ts tests/memory.test.ts tests/analysis.test.ts",
     "typecheck": "tsc --noEmit"
   },
