@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc --noEmit false --outDir dist",
     "dev:api": "tsx watch backend/src/server.ts",
-    "test": "tsx --test tests/project.test.ts tests/backend.test.ts",
+    "test": "tsx --test tests/project.test.ts tests/backend.test.ts tests/memory.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
