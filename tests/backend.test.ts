@@ -21,6 +21,10 @@ test("incident and metrics endpoints return the investigation input", async () =
 		assert.equal(metrics.errorRate, 18.2);
 		assert.equal(metrics.redisLatency, 420);
 		assert.equal(metrics.redisConnectionPoolUsage, 100);
+
+		const statusResponse = await fetch(`${baseUrl}/api/status`);
+		const status = await statusResponse.json();
+		assert.deepEqual(status, { hindsight: "disconnected", llm: "disconnected", metrics: "connected", agent: "degraded" });
 	} finally {
 		server.closeAllConnections();
 		await new Promise<void>((resolve, reject) => {
@@ -72,6 +76,8 @@ test("incident learning workflow recalls memory before and after resolution", as
 		assert.equal(afterSeed.memories.length, 1);
 		assert.match(afterSeed.memories[0].text, /Redis connection pool exhaustion/);
 		assert.equal(analysisInputs[1].metrics.redisConnectionPoolUsage, 100);
+		assert.deepEqual(afterSeed.trace.map((event: { id: string }) => event.id), ["metrics", "recall", "analysis"]);
+		assert.equal(afterSeed.trace.every((event: { status: string; durationMs: number }) => event.status === "completed" && event.durationMs >= 0), true);
 
 		const resolutionResponse = await fetch(`${baseUrl}/api/incidents/INC-001/resolve`, { method: "POST" });
 		const resolution = await resolutionResponse.json();
@@ -83,6 +89,36 @@ test("incident learning workflow recalls memory before and after resolution", as
 		assert.equal(nextIncident.id, "INC-002");
 		const nextInvestigation = await (await investigate("INC-002")).json();
 		assert.equal(nextInvestigation.memories.length, 2);
+	} finally {
+		server.closeAllConnections();
+		await new Promise<void>((resolve, reject) => {
+			server.close((error) => error ? reject(error) : resolve());
+		});
+	}
+});
+
+test("investigation failures identify the failing provider and preserve completed activity", async () => {
+	const server = createApp({
+		memoryService: {
+			retainIncident: async () => {},
+			recallIncidents: async () => [],
+			resetDemoMemories: async () => {},
+		},
+		analysisService: {
+			analyze: async () => { throw Object.assign(new Error("model not found"), { status: 404 }); },
+		},
+	}).listen(0, "127.0.0.1");
+	await once(server, "listening");
+	const address = server.address();
+	assert.ok(address && typeof address !== "string");
+
+	try {
+		const response = await fetch(`http://127.0.0.1:${address.port}/api/incidents/INC-001/investigate`, { method: "POST" });
+		const body = await response.json();
+		assert.equal(response.status, 503);
+		assert.equal(body.code, "GROQ_MODEL_UNAVAILABLE");
+		assert.equal(body.dependency, "llm");
+		assert.deepEqual(body.trace.map((event: { status: string }) => event.status), ["completed", "completed", "failed"]);
 	} finally {
 		server.closeAllConnections();
 		await new Promise<void>((resolve, reject) => {

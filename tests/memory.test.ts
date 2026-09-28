@@ -8,6 +8,7 @@ test("retains structured incident experience through the Hindsight client contra
 	const calls: Array<{ bankId: string; content: string; options?: { context?: string; documentId?: string } }> = [];
 	const deleted: string[] = [];
 	const memory = new MemoryService({
+		getVersion: async () => ({}),
 		createBank: async () => ({}),
 		retain: async (bankId, content, options) => { calls.push({ bankId, content, options }); return {}; },
 		listDocuments: async () => ({ items: [{ id: "bugslayers-demo-HIST-001" }, { id: "other-team-document" }], total: 2 }),
@@ -28,6 +29,7 @@ test("builds an incident-specific recall query and maps documented result fields
 	let query = "";
 	let selectedBudget: string | undefined;
 	const memory = new MemoryService({
+		getVersion: async () => ({}),
 		createBank: async () => ({}),
 		retain: async () => ({}),
 		listDocuments: async () => ({ items: [], total: 0 }),
@@ -50,6 +52,7 @@ test("builds an incident-specific recall query and maps documented result fields
 test("demo reset deletes only documents owned by this prototype", async () => {
 	const deleted: string[] = [];
 	const memory = new MemoryService({
+		getVersion: async () => ({}),
 		createBank: async () => ({}),
 		retain: async () => ({}),
 		listDocuments: async () => ({ items: [{ id: "bugslayers-demo-HIST-001" }, { id: "shared-team-incident" }], total: 2 }),

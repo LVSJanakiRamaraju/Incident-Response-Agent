@@ -3,6 +3,7 @@ import { demoIncident } from "./incidents/incident.js";
 import { historicalIncident, MemoryService, createMemoryServiceFromEnv } from "./memory/memory.service.js";
 import { AnalysisService, createAnalysisServiceFromEnv, type AnalysisInput, type IncidentAnalysis } from "./llm/analysis.service.js";
 import { getMetrics, getResolvedMetrics, type ServiceMetrics } from "./tools/metrics.js";
+import { createStatusChecksFromEnv, getSystemStatus, type StatusChecks } from "./system/status.service.js";
 
 interface MemoryServicePort {
 	retainIncident: (experience: Parameters<MemoryService["retainIncident"]>[0]) => Promise<void>;
@@ -14,9 +15,10 @@ interface AnalysisServicePort {
 	analyze: (input: AnalysisInput) => Promise<IncidentAnalysis>;
 }
 
-export function createApp(dependencies: { memoryService?: MemoryServicePort; analysisService?: AnalysisServicePort } = {}) {
+export function createApp(dependencies: { memoryService?: MemoryServicePort; analysisService?: AnalysisServicePort; statusChecks?: StatusChecks } = {}) {
 	let memoryService = dependencies.memoryService;
 	let analysisService = dependencies.analysisService;
+	const statusChecks = dependencies.statusChecks;
 	let currentIncident = { ...demoIncident, symptoms: [...demoIncident.symptoms] };
 	let incidentSequence = 1;
 	let lastInvestigation: { incidentId: string; metrics: ServiceMetrics; analysis: IncidentAnalysis } | undefined;
@@ -25,6 +27,10 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 
 	app.get("/api/health", (_request, response) => {
 		response.json({ status: "ok" });
+	});
+
+	app.get("/api/status", async (_request, response) => {
+		response.json(await getSystemStatus(statusChecks ?? createStatusChecksFromEnv()));
 	});
 
 	app.get("/api/incidents/active", (_request, response) => {
@@ -59,25 +65,44 @@ export function createApp(dependencies: { memoryService?: MemoryServicePort; ana
 			return;
 		}
 
+		const trace: Array<{ id: string; label: string; detail: string; status: "completed" | "failed"; durationMs: number; occurredAt: string }> = [];
+		const metricStarted = Date.now();
+		let metrics: ServiceMetrics;
 		try {
-			const metrics = getMetrics(currentIncident.service);
-			memoryService ??= createMemoryServiceFromEnv();
-			const memories = await memoryService.recallIncidents(currentIncident, metrics);
-			analysisService ??= createAnalysisServiceFromEnv();
-			const analysis = await analysisService.analyze({ incident: currentIncident, metrics, memories });
-			lastInvestigation = { incidentId: currentIncident.id, metrics, analysis };
-			response.json({
-				incident: currentIncident,
-				metrics,
-				memories,
-				analysis,
-				status: "HYPOTHESIS",
-			});
+			metrics = getMetrics(currentIncident.service);
+			trace.push({ id: "metrics", label: "Metrics tool executed", detail: `getMetrics(\"${currentIncident.service}\")`, status: "completed", durationMs: Date.now() - metricStarted, occurredAt: new Date().toISOString() });
 		} catch {
-			response.status(503).json({
-				error: "Investigation could not complete. Check the Hindsight service, API key, and Groq model configuration.",
-			});
+			trace.push({ id: "metrics", label: "Metrics collection failed", detail: "The metrics tool could not return current evidence.", status: "failed", durationMs: Date.now() - metricStarted, occurredAt: new Date().toISOString() });
+			response.status(503).json({ code: "METRICS_UNAVAILABLE", dependency: "metrics", error: "The metrics tool could not collect current evidence.", trace });
+			return;
 		}
+
+		memoryService ??= createMemoryServiceFromEnv();
+		const recallStarted = Date.now();
+		let memories;
+		try {
+			memories = await memoryService.recallIncidents(currentIncident, metrics);
+		} catch {
+			trace.push({ id: "recall", label: "Hindsight memory search failed", detail: "The current incident could not be compared with stored experience.", status: "failed", durationMs: Date.now() - recallStarted, occurredAt: new Date().toISOString() });
+			response.status(503).json({ code: "HINDSIGHT_UNAVAILABLE", dependency: "hindsight", error: "Hindsight could not return incident memories. Check its API URL and credentials.", trace });
+			return;
+		}
+		trace.push({ id: "recall", label: memories.length ? "Hindsight memories recalled" : "Hindsight search completed", detail: `${memories.length} memories returned`, status: "completed", durationMs: Date.now() - recallStarted, occurredAt: new Date().toISOString() });
+
+		analysisService ??= createAnalysisServiceFromEnv();
+		const analysisStarted = Date.now();
+		let analysis: IncidentAnalysis;
+		try {
+			analysis = await analysisService.analyze({ incident: currentIncident, metrics, memories });
+		} catch (error) {
+			const unavailableModel = (error as { status?: number }).status === 404;
+			trace.push({ id: "analysis", label: "Groq analysis failed", detail: unavailableModel ? "The configured model was not found or is not available to this account." : "The model provider did not complete the analysis request.", status: "failed", durationMs: Date.now() - analysisStarted, occurredAt: new Date().toISOString() });
+			response.status(503).json({ code: unavailableModel ? "GROQ_MODEL_UNAVAILABLE" : "GROQ_ANALYSIS_FAILED", dependency: "llm", error: unavailableModel ? "The configured Groq model is unavailable. Set GROQ_MODEL to a model ID enabled for your account." : "Groq analysis failed. Check the API key, model access, and provider status.", trace });
+			return;
+		}
+		trace.push({ id: "analysis", label: "Agent analysis generated", detail: "Current evidence and recalled memories were supplied to the model.", status: "completed", durationMs: Date.now() - analysisStarted, occurredAt: new Date().toISOString() });
+		lastInvestigation = { incidentId: currentIncident.id, metrics, analysis };
+		response.json({ incident: currentIncident, metrics, memories, analysis, status: "HYPOTHESIS", trace });
 	});
 
 	app.post("/api/incidents/:id/resolve", async (request, response) => {

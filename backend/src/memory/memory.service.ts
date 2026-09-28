@@ -20,6 +20,7 @@ export interface IncidentMemory {
 }
 
 interface HindsightPort {
+	getVersion: () => Promise<unknown>;
 	createBank: (bankId: string, options?: { name?: string; reflectMission?: string; retainMission?: string }) => Promise<unknown>;
 	retain: (bankId: string, content: string, options?: { context?: string; metadata?: Record<string, string>; documentId?: string }) => Promise<unknown>;
 	listDocuments: (bankId: string, options?: { limit?: number; offset?: number }) => Promise<{ items: Array<{ id: string }>; total: number }>;
@@ -60,6 +61,10 @@ export class MemoryService {
 		private readonly client: HindsightPort,
 		private readonly bankId: string,
 	) {}
+
+	async checkConnection(): Promise<void> {
+		await this.client.getVersion();
+	}
 
 	async retainIncident(experience: IncidentExperience): Promise<void> {
 		await this.ensureBank();
