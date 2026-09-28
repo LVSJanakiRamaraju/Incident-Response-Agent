@@ -1,29 +1,3 @@
-# Incident Response Agent
-
-An incident-response agent designed to learn from resolved incidents using Hindsight by Vectorize. The project is being built incrementally, starting with a verified memory loop before adding reasoning, investigation tools, or a user interface.
-
-## Current status
-
-Phase 0: repository and TypeScript tooling setup. Agent functionality has not been implemented yet.
-
-## Development
-
-Requirements: Node.js 20 or later and npm.
-
-```powershell
-npm install
-npm run typecheck
-npm test
-npm run build
-```
-
-Copy `.env.example` to `.env` and fill in credentials when the corresponding integrations are implemented. Never commit `.env` or API credentials.
-
-## Architecture direction
-
-
-See [docs/architecture.md](docs/architecture.md) for the initial decision record.
-
 # BugSlayers Incident Response Agent
 
 A local incident-response prototype that demonstrates how persistent organizational experience changes an investigation. Before Hindsight has a relevant incident, the agent reasons from current evidence alone. After a resolved incident is retained, a later investigation can recall its cause, resolution, and lesson.
@@ -34,7 +8,7 @@ Production incident knowledge is often fragmented across tickets, runbooks, logs
 
 ## Solution
 
-The agent loads a Payment API 503 incident, calls a simulated metrics tool, recalls relevant incident experience from Hindsight, and sends the current incident, tool evidence, and recalled memories to a Groq-hosted model. It returns a structured hypothesis, rationale, next action, confidence, and uncertainty. Resolving the simulated incident retains its evidence and outcome in Hindsight for the next investigation.
+The agent loads a Payment API 503 incident, recalls relevant incident experience from Hindsight, calls simulated metrics and recent-logs tools, and sends the incident, current tool evidence, and historical memories to a Groq-hosted model. It returns a structured hypothesis, rationale, next action, confidence, and uncertainty. Resolving the simulated incident retains its evidence and outcome in Hindsight for the next investigation.
 
 ## Why Hindsight?
 
@@ -54,7 +28,7 @@ The demo's historical event records a Payment API 503 outage, Redis latency, 100
 - `frontend/`: React and Vite incident dashboard.
 - `backend/src/app.ts`: Express API and incident workflow.
 - `backend/src/memory/`: Hindsight client boundary and incident experience model.
-- `backend/src/tools/`: deterministic metrics tool used by the investigation route.
+- `backend/src/tools/`: deterministic metrics and recent-logs tools used by the investigation route.
 - `backend/src/llm/`: Groq integration and response validation.
 - `tests/`: API, memory, analysis, and end-to-end learning-loop tests.
 
@@ -107,6 +81,7 @@ See [docs/demo.md](docs/demo.md) for the presenter walkthrough. In short: reset 
 - `GET /api/health`
 - `GET /api/incidents/active`
 - `GET /api/tools/metrics/:service`
+- `GET /api/tools/logs/:service`
 - `POST /api/memory/seed`
 - `POST /api/incidents/:id/investigate`
 - `POST /api/incidents/:id/resolve`
